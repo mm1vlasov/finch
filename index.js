@@ -18,7 +18,7 @@ const ROLES = {
     botManager: '1474124857443876956', 
     colonel: '1474138109376598097',    
     officer: '1474139720047919125',    
-    staff: '1474130768627503309' // Роль Condition (выдается при одобрении)
+    staff: '1474130768627503309' // Роль Condition
 };
 
 const STAFF_CHANNEL_ID = '1474147428239278221';
@@ -30,7 +30,6 @@ const getMSKTime = () => {
 
 client.once('ready', () => {
     console.log(`✅ Бот запущен: ${client.user.tag}`);
-    // Автообновление раз в 5 минут
     setInterval(() => updateStaffList(), 300000);
 });
 
@@ -45,7 +44,6 @@ async function updateStaffList() {
 
         const createEmbed = (roleId, title) => {
             const role = guild.roles.cache.get(roleId);
-            // ИСПРАВЛЕНО: Полностью убраны индексы. Теперь только точка и тег.
             const content = (role && role.members.size > 0) 
                 ? role.members.map(m => `• <@${m.id}> | ${m.displayName}`).join('\n')
                 : '—';
@@ -69,7 +67,6 @@ async function updateStaffList() {
 client.on('messageCreate', async (message) => {
     if (message.author.bot || !message.guild) return;
     
-    // Доступ к командам настройки только для роли Ботовод
     if (['!setup', '!guide', '!update_staff'].some(cmd => message.content.startsWith(cmd))) {
         if (!message.member.roles.cache.has(ROLES.botManager)) return;
     }
@@ -89,14 +86,14 @@ client.on('messageCreate', async (message) => {
 
 client.on('interactionCreate', async (interaction) => {
     
-    // 1. ОТКРЫТИЕ МОДАЛКИ (С описаниями из image_8c7ee4.png)
+    // 1. ОТКРЫТИЕ МОДАЛКИ (Добавлено поле Никнейма)
     if (interaction.isButton() && interaction.customId === 'apply_button') {
         const modal = new ModalBuilder().setCustomId('apply_modal').setTitle('Заявление в клан');
         const fields = [
+            { id: 'nickname', label: 'Ваш игровой никнейм?', style: TextInputStyle.Short },
             { id: 'bio', label: 'Укажите свою Био и Боевую броню с заточкой:', style: TextInputStyle.Paragraph },
             { id: 'stats', label: 'Укажите приведу в жир сборке без бустов:', style: TextInputStyle.Short },
             { id: 'weapon', label: 'Укажите своё основное оружие с заточкой:', style: TextInputStyle.Short },
-            { id: 'sniper', label: 'Укажите свою основную снайперку с заточкой:', style: TextInputStyle.Short },
             { id: 'online', label: 'Укажите свой онлайн на КВ: (Пример: 3/3, 4/4)', style: TextInputStyle.Short }
         ].map(f => new ActionRowBuilder().addComponents(
             new TextInputBuilder().setCustomId(f.id).setLabel(f.label).setStyle(f.style).setRequired(true)
@@ -105,7 +102,7 @@ client.on('interactionCreate', async (interaction) => {
         return await interaction.showModal(modal);
     }
 
-    // 2. ОБРАБОТКА АНКЕТЫ (С временем МСК)
+    // 2. ОБРАБОТКА АНКЕТЫ
     if (interaction.isModalSubmit() && interaction.customId === 'apply_modal') {
         await interaction.deferReply({ ephemeral: true });
 
@@ -115,15 +112,16 @@ client.on('interactionCreate', async (interaction) => {
             .setTitle('— • Заявка на Condition')
             .setDescription(
                 `🔹 **Пользователь:** <@${interaction.user.id}>\n` +
+                `🔹 **Игровой ник:** \`${interaction.fields.getTextInputValue('nickname')}\`\n` + // Ник в описании
                 `🔹 **ID:** \`${interaction.user.id}\`\n` +
                 `🔹 **Присоединился:** ${time(interaction.member.joinedAt, 'D')}\n` +
                 `🔹 **Время подачи (МСК):** \`${getMSKTime()}\``
             )
             .addFields(
+                { name: '┃ Игровой никнейм:', value: `\`\`\`${interaction.fields.getTextInputValue('nickname')}\`\`\`` },
                 { name: '┃ Основная броня:', value: `\`\`\`${interaction.fields.getTextInputValue('bio')}\`\`\`` },
                 { name: '┃ Приведа:', value: `\`\`\`${interaction.fields.getTextInputValue('stats')}\`\`\`` },
                 { name: '┃ Основное оружие:', value: `\`\`\`${interaction.fields.getTextInputValue('weapon')}\`\`\`` },
-                { name: '┃ Основная снайперка:', value: `\`\`\`${interaction.fields.getTextInputValue('sniper')}\`\`\`` },
                 { name: '┃ Онлайн на КВ:', value: `\`\`\`${interaction.fields.getTextInputValue('online')}\`\`\`` }
             );
 
@@ -138,14 +136,13 @@ client.on('interactionCreate', async (interaction) => {
         return await interaction.editReply({ content: 'Ваша заявка успешно отправлена!' });
     }
 
-    // 3. УПРАВЛЕНИЕ ЗАЯВКАМИ (Полковники)
+    // 3. УПРАВЛЕНИЕ ЗАЯВКАМИ
     if (interaction.isButton() && (interaction.customId.startsWith('call_') || interaction.customId.startsWith('accept_') || interaction.customId.startsWith('reject_'))) {
         if (!interaction.member.roles.cache.has(ROLES.colonel)) return interaction.reply({ content: '❌ Доступ только для Полковников.', ephemeral: true });
 
         const [action, userId] = interaction.customId.split('_');
         const targetUser = await client.users.fetch(userId).catch(() => null);
 
-        // ВЫЗОВ НА ОБЗВОН (Как в image_8c7460.png)
         if (action === 'call') {
             await interaction.deferReply({ ephemeral: true });
             const callEmbed = new EmbedBuilder()
@@ -159,11 +156,9 @@ client.on('interactionCreate', async (interaction) => {
             return await interaction.editReply({ content: 'Кандидат вызван.' });
         }
 
-        // ПРИНЯТИЕ (+Выдача роли)
         if (action === 'accept') {
             await interaction.deferReply({ ephemeral: true });
             
-            // Выдача роли Condition
             const member = await interaction.guild.members.fetch(userId).catch(() => null);
             if (member) {
                 await member.roles.add(ROLES.staff).catch(err => console.error("Ошибка роли:", err));
@@ -185,7 +180,6 @@ client.on('interactionCreate', async (interaction) => {
             return await interaction.editReply({ content: 'Принято.' });
         }
 
-        // ОТКЛОНЕНИЕ
         if (action === 'reject') {
             const modal = new ModalBuilder().setCustomId(`reject_modal_${userId}`).setTitle('Отклонение заявки');
             modal.addComponents(new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('reason').setLabel('Укажите причину отказа:').setStyle(TextInputStyle.Paragraph).setRequired(true)));
@@ -193,7 +187,7 @@ client.on('interactionCreate', async (interaction) => {
         }
     }
 
-    // 4. ОБРАБОТКА МОДАЛКИ ОТКЛОНЕНИЯ (С временем МСК)
+    // 4. ОБРАБОТКА МОДАЛКИ ОТКЛОНЕНИЯ
     if (interaction.isModalSubmit() && interaction.customId.startsWith('reject_modal_')) {
         await interaction.deferReply({ ephemeral: true });
         const userId = interaction.customId.split('_')[2];
