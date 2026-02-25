@@ -93,7 +93,7 @@ client.on('interactionCreate', async (interaction) => {
             { id: 'nickname', label: 'Ваш игровой никнейм?', style: TextInputStyle.Short },
             { id: 'bio', label: 'Укажите свою Био и Боевую броню с заточкой:', style: TextInputStyle.Paragraph },
             { id: 'stats', label: 'Укажите приведу в жир сборке без бустов:', style: TextInputStyle.Short },
-            { id: 'weapon', label: 'Укажите своё основное оружие и снайперку с заточкой:', style: TextInputStyle.Short },
+            { id: 'weapon', label: 'Какое оружие и снайперка с заточкой:', style: TextInputStyle.Short },
             { id: 'online', label: 'Укажите свой онлайн на КВ: (Пример: 3/3, 4/4)', style: TextInputStyle.Short }
         ].map(f => new ActionRowBuilder().addComponents(
             new TextInputBuilder().setCustomId(f.id).setLabel(f.label).setStyle(f.style).setRequired(true)
