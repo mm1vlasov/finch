@@ -86,7 +86,7 @@ client.on('messageCreate', async (message) => {
 
 client.on('interactionCreate', async (interaction) => {
     
-    // 1. ОТКРЫТИЕ МОДАЛКИ (Добавлено поле Никнейма)
+    // 1. ОТКРЫТИЕ МОДАЛКИ
     if (interaction.isButton() && interaction.customId === 'apply_button') {
         const modal = new ModalBuilder().setCustomId('apply_modal').setTitle('Заявление в клан');
         const fields = [
@@ -112,7 +112,7 @@ client.on('interactionCreate', async (interaction) => {
             .setTitle('— • Заявка на Condition')
             .setDescription(
                 `🔹 **Пользователь:** <@${interaction.user.id}>\n` +
-                `🔹 **Игровой ник:** \`${interaction.fields.getTextInputValue('nickname')}\`\n` + // Ник в описании
+                `🔹 **Игровой ник:** \`${interaction.fields.getTextInputValue('nickname')}\`\n` +
                 `🔹 **ID:** \`${interaction.user.id}\`\n` +
                 `🔹 **Присоединился:** ${time(interaction.member.joinedAt, 'D')}\n` +
                 `🔹 **Время подачи (МСК):** \`${getMSKTime()}\``
@@ -121,7 +121,7 @@ client.on('interactionCreate', async (interaction) => {
                 { name: '┃ Игровой никнейм:', value: `\`\`\`${interaction.fields.getTextInputValue('nickname')}\`\`\`` },
                 { name: '┃ Основная броня:', value: `\`\`\`${interaction.fields.getTextInputValue('bio')}\`\`\`` },
                 { name: '┃ Приведа:', value: `\`\`\`${interaction.fields.getTextInputValue('stats')}\`\`\`` },
-                { name: '┃ Основное оружие:', value: `\`\`\`${interaction.fields.getTextInputValue('weapon')}\`\`\`` },
+                { name: '┃ Оружие и снайперка:', value: `\`\`\`${interaction.fields.getTextInputValue('weapon')}\`\`\`` },
                 { name: '┃ Онлайн на КВ:', value: `\`\`\`${interaction.fields.getTextInputValue('online')}\`\`\`` }
             );
 
