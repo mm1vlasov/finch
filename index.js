@@ -42,7 +42,7 @@ const COMMAND_ACCESS = [ROLES.leader, ROLES.colonel, ROLES.fullAccess];
 
 const getMSKTime = () => new Date().toLocaleString("ru-RU", {timeZone: "Europe/Moscow", hour: '2-digit', minute:'2-digit', day: '2-digit', month: '2-digit', year: 'numeric'});
 
-// --- МОНИТОРИНГ СОСТАВА ---
+// --- МОНИТОРИНГ СОСТАВА (ИСПРАВЛЕНО) ---
 async function updateStaffList() {
     try {
         const guild = client.guilds.cache.first();
@@ -51,24 +51,48 @@ async function updateStaffList() {
         if (!staffChannel) return;
 
         await guild.members.fetch();
-        const createEmbed = (roleId, title) => {
-            const role = guild.roles.cache.get(roleId);
-            const content = (role && role.members.size > 0) 
-                ? role.members.map(m => `• <@${m.id}> | ${m.displayName}`).join('\n') : '—';
+
+        // Списки для распределения
+        const list = {
+            leader: [],
+            colonel: [],
+            officer: [],
+            staff: []
+        };
+
+        // Проходим по всем участникам и определяем их в ОДНУ высшую категорию
+        guild.members.cache.forEach(member => {
+            if (member.user.bot) return;
+
+            if (member.roles.cache.has(ROLES.leader)) {
+                list.leader.push(`• <@${member.id}> | ${member.displayName}`);
+            } else if (member.roles.cache.has(ROLES.colonel)) {
+                list.colonel.push(`• <@${member.id}> | ${member.displayName}`);
+            } else if (member.roles.cache.has(ROLES.officer)) {
+                list.officer.push(`• <@${member.id}> | ${member.displayName}`);
+            } else if (member.roles.cache.has(ROLES.staff)) {
+                list.staff.push(`• <@${member.id}> | ${member.displayName}`);
+            }
+        });
+
+        const createEmbed = (title, membersArray) => {
+            const content = membersArray.length > 0 ? membersArray.join('\n') : '—';
             return new EmbedBuilder().setColor('#2b2d31').setTitle(title).setDescription(content);
         };
 
         const embeds = [
-            createEmbed(ROLES.leader, 'Лидер'),
-            createEmbed(ROLES.colonel, 'Полковник'),
-            createEmbed(ROLES.officer, 'Офицер'),
-            createEmbed(ROLES.staff, 'Staff')
+            createEmbed('Лидер', list.leader),
+            createEmbed('Полковник', list.colonel),
+            createEmbed('Офицер', list.officer),
+            createEmbed('Участники клана', list.staff)
         ];
 
         const messages = await staffChannel.messages.fetch({ limit: 10 }).catch(() => null);
         const botMsg = messages?.find(m => m.author.id === client.user.id);
+        
         if (botMsg) await botMsg.edit({ embeds });
         else await staffChannel.send({ embeds });
+
     } catch (e) { console.error(e); }
 }
 
