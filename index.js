@@ -16,14 +16,17 @@ const client = new Client({
 
 const ROLES = {
     botManager: '1474124857443876956', 
-    colonel: '1474138109376598097',    
-    officer: '1474139720047919125',    
-    staff: '1474130768627503309' // Роль Condition
+    leader: '1474847275715920074',   // Лидер
+    colonel: '1474138109376598097', 
+    officer: '1474139720047919125',  // Офицер
+    staff: '1474130768627503309'    // Роль Condition
 };
+
+// Список ролей, которые могут рассматривать заявки
+const ADM_ROLES = [ROLES.leader, ROLES.colonel, ROLES.officer];
 
 const STAFF_CHANNEL_ID = '1474147428239278221';
 
-// Функция для получения времени по МСК
 const getMSKTime = () => {
     return new Date().toLocaleString("ru-RU", {timeZone: "Europe/Moscow", hour: '2-digit', minute:'2-digit', day: '2-digit', month: '2-digit', year: 'numeric'});
 };
@@ -51,6 +54,7 @@ async function updateStaffList() {
         };
 
         const embeds = [
+            createEmbed(ROLES.leader, 'Лидер'),
             createEmbed(ROLES.colonel, 'Полковник'),
             createEmbed(ROLES.officer, 'Офицер'),
             createEmbed(ROLES.staff, 'Staff')
@@ -86,15 +90,14 @@ client.on('messageCreate', async (message) => {
 
 client.on('interactionCreate', async (interaction) => {
     
-    // 1. ОТКРЫТИЕ МОДАЛКИ
     if (interaction.isButton() && interaction.customId === 'apply_button') {
         const modal = new ModalBuilder().setCustomId('apply_modal').setTitle('Заявление в клан');
         const fields = [
             { id: 'nickname', label: 'Ваш игровой никнейм?', style: TextInputStyle.Short },
-            { id: 'bio', label: 'Укажите свою Био и Боевую броню с заточкой:', style: TextInputStyle.Paragraph },
-            { id: 'stats', label: 'Укажите приведу в жир сборке без бустов:', style: TextInputStyle.Short },
-            { id: 'weapon', label: 'Какое оружие и снайперка с заточкой:', style: TextInputStyle.Short },
-            { id: 'online', label: 'Укажите свой онлайн на КВ: (Пример: 3/3, 4/4)', style: TextInputStyle.Short }
+            { id: 'bio', label: 'Ваша Био и Броня с заточкой:', style: TextInputStyle.Paragraph },
+            { id: 'stats', label: 'Приведа в жире (без бустов):', style: TextInputStyle.Short },
+            { id: 'weapon', label: 'Оружие и снайперка с заточкой:', style: TextInputStyle.Short },
+            { id: 'online', label: 'Ваш онлайн на КВ (Пример: 3/3):', style: TextInputStyle.Short }
         ].map(f => new ActionRowBuilder().addComponents(
             new TextInputBuilder().setCustomId(f.id).setLabel(f.label).setStyle(f.style).setRequired(true)
         ));
@@ -102,7 +105,6 @@ client.on('interactionCreate', async (interaction) => {
         return await interaction.showModal(modal);
     }
 
-    // 2. ОБРАБОТКА АНКЕТЫ
     if (interaction.isModalSubmit() && interaction.customId === 'apply_modal') {
         await interaction.deferReply({ ephemeral: true });
 
@@ -132,13 +134,15 @@ client.on('interactionCreate', async (interaction) => {
         );
 
         const channel = interaction.guild.channels.cache.get(config.channels.activeApps);
-        if (channel) await channel.send({ content: `<@&${ROLES.colonel}>`, embeds: [embed], components: [row] });
+        if (channel) await channel.send({ content: `<@&${ROLES.leader}> <@&${ROLES.colonel}>`, embeds: [embed], components: [row] });
         return await interaction.editReply({ content: 'Ваша заявка успешно отправлена!' });
     }
 
-    // 3. УПРАВЛЕНИЕ ЗАЯВКАМИ
     if (interaction.isButton() && (interaction.customId.startsWith('call_') || interaction.customId.startsWith('accept_') || interaction.customId.startsWith('reject_'))) {
-        if (!interaction.member.roles.cache.has(ROLES.colonel)) return interaction.reply({ content: '❌ Доступ только для Полковников.', ephemeral: true });
+        // ПРОВЕРКА ДОСТУПА: Лидер, Полковник или Офицер
+        if (!ADM_ROLES.some(roleId => interaction.member.roles.cache.has(roleId))) {
+            return interaction.reply({ content: '❌ Доступ только для Руководства (Лидер/Полковник/Офицер).', ephemeral: true });
+        }
 
         const [action, userId] = interaction.customId.split('_');
         const targetUser = await client.users.fetch(userId).catch(() => null);
@@ -158,11 +162,8 @@ client.on('interactionCreate', async (interaction) => {
 
         if (action === 'accept') {
             await interaction.deferReply({ ephemeral: true });
-            
             const member = await interaction.guild.members.fetch(userId).catch(() => null);
-            if (member) {
-                await member.roles.add(ROLES.staff).catch(err => console.error("Ошибка роли:", err));
-            }
+            if (member) await member.roles.add(ROLES.staff).catch(e => console.error("Ошибка роли:", e));
 
             if (targetUser) {
                 const dm = new EmbedBuilder().setColor('#43b581').setTitle('🎉 Вы приняты!').setDescription(`Здравствуйте! Ваша заявка в **Condition** была одобрена! Вам выдана роль.`);
@@ -182,12 +183,11 @@ client.on('interactionCreate', async (interaction) => {
 
         if (action === 'reject') {
             const modal = new ModalBuilder().setCustomId(`reject_modal_${userId}`).setTitle('Отклонение заявки');
-            modal.addComponents(new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('reason').setLabel('Укажите причину отказа:').setStyle(TextInputStyle.Paragraph).setRequired(true)));
+            modal.addComponents(new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('reason').setLabel('Причина отказа:').setStyle(TextInputStyle.Paragraph).setRequired(true)));
             return await interaction.showModal(modal);
         }
     }
 
-    // 4. ОБРАБОТКА МОДАЛКИ ОТКЛОНЕНИЯ
     if (interaction.isModalSubmit() && interaction.customId.startsWith('reject_modal_')) {
         await interaction.deferReply({ ephemeral: true });
         const userId = interaction.customId.split('_')[2];
