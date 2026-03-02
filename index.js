@@ -1,8 +1,9 @@
 const { 
     Client, GatewayIntentBits, EmbedBuilder, ActionRowBuilder, 
     ButtonBuilder, ButtonStyle, ModalBuilder, TextInputBuilder, 
-    TextInputStyle, time
+    TextInputStyle, time, Partials
 } = require('discord.js');
+const cron = require('node-cron');
 const config = require('./config.json');
 
 const client = new Client({
@@ -11,100 +12,128 @@ const client = new Client({
         GatewayIntentBits.GuildMessages,
         GatewayIntentBits.MessageContent,
         GatewayIntentBits.GuildMembers 
-    ]
+    ],
+    partials: [Partials.Message, Partials.Channel, Partials.Reaction]
 });
 
+// --- КОНФИГУРАЦИЯ ID ---
 const ROLES = {
     botManager: '1474124857443876956', 
-    leader: '1474847275715920074',
+    leader: '1474847275715920074', 
     colonel: '1474138109376598097', 
-    officer: '1474139720047919125',
+    officer: '1474139720047919125', 
     staff: '1474130768627503309',
-    emission: '1477776468225425518' // Роль уведомлений о выбросах
+    emission: '1477776468225425518'
 };
 
-const ADM_ROLES = [ROLES.leader, ROLES.colonel, ROLES.officer];
-const STAFF_CHANNEL_ID = '1474147428239278221';
-const EMISSION_CHANNEL_ID = '1477968178234785846'; // Канал для сообщения о выбросах
-
-const getMSKTime = () => {
-    return new Date().toLocaleString("ru-RU", {timeZone: "Europe/Moscow", hour: '2-digit', minute:'2-digit', day: '2-digit', month: '2-digit', year: 'numeric'});
+const CHANNELS = {
+    staffList: '1474147428239278221',
+    emission: '1477968178234785846',
+    kvNotice: '1474137748628836444', 
+    kvVoice: '1474135459633430600',
+    activeApps: config.channels.activeApps, 
+    archive: config.channels.archive       
 };
 
-client.once('ready', () => {
-    console.log(`✅ Бот запущен: ${client.user.tag}`);
-    setInterval(() => updateStaffList(), 300000);
-});
+// Списки доступа
+const ADM_ROLES = [ROLES.leader, ROLES.colonel, ROLES.officer]; // Кто рассматривает заявки (кнопки)
+const COMMAND_ACCESS = [ROLES.leader, ROLES.colonel]; // Кто использует команды бота (!setup, !embed и др.)
 
+const getMSKTime = () => new Date().toLocaleString("ru-RU", {timeZone: "Europe/Moscow", hour: '2-digit', minute:'2-digit', day: '2-digit', month: '2-digit', year: 'numeric'});
+
+// --- АВТОМАТИЗАЦИЯ КВ ---
+async function sendKVNotice(manualGuild = null) {
+    const guild = manualGuild || client.guilds.cache.first();
+    if (!guild) return;
+    const channel = guild.channels.cache.get(CHANNELS.kvNotice);
+    if (!channel) return;
+
+    const embed = new EmbedBuilder()
+        .setColor('#cc0000')
+        .setTitle('⚔️ ОБЩИЙ СБОР НА КЛАНОВЫЕ ВОЙНЫ')
+        .setDescription(`Бойцы, пора в бой! Собираемся в голосовом канале.\n\n📍 **Место:** [ЗАЙТИ В ГОЛОСОВОЙ КАНАЛ](https://discord.com/channels/${guild.id}/${CHANNELS.kvVoice})`)
+        .addFields({ name: '⏰ Время:', value: '`19:30 МСК`' })
+        .setImage('https://i.imgur.com/uG9pYpY.png')
+        .setTimestamp();
+
+    await channel.send({ content: `<@&${ROLES.staff}>`, embeds: [embed] });
+}
+
+// --- МОНИТОРИНГ СОСТАВА ---
 async function updateStaffList() {
     try {
         const guild = client.guilds.cache.first();
-        if (!guild) return;
-        const staffChannel = guild.channels.cache.get(STAFF_CHANNEL_ID);
-        if (!staffChannel) return;
+        if (!guild || !guild.channels.cache.has(CHANNELS.staffList)) return;
+        const staffChannel = guild.channels.cache.get(CHANNELS.staffList);
         await guild.members.fetch();
+
         const createEmbed = (roleId, title) => {
             const role = guild.roles.cache.get(roleId);
             const content = (role && role.members.size > 0) 
-                ? role.members.map(m => `• <@${m.id}> | ${m.displayName}`).join('\n')
-                : '—';
+                ? role.members.map(m => `• <@${m.id}> | ${m.displayName}`).join('\n') : '—';
             return new EmbedBuilder().setColor('#2b2d31').setTitle(title).setDescription(content);
         };
+
         const embeds = [
             createEmbed(ROLES.leader, 'Лидер'),
             createEmbed(ROLES.colonel, 'Полковник'),
             createEmbed(ROLES.officer, 'Офицер'),
             createEmbed(ROLES.staff, 'Staff')
         ];
-        const messages = await staffChannel.messages.fetch({ limit: 10 }).catch(() => null);
-        const botMsg = messages?.find(m => m.author.id === client.user.id);
+
+        const messages = await staffChannel.messages.fetch({ limit: 10 });
+        const botMsg = messages.find(m => m.author.id === client.user.id);
         if (botMsg) await botMsg.edit({ embeds });
         else await staffChannel.send({ embeds });
-    } catch (e) { console.error("Ошибка автообновления:", e); }
+    } catch (e) { console.error(e); }
 }
+
+client.once('ready', () => {
+    console.log(`✅ Бот запущен: ${client.user.tag}`);
+    cron.schedule('30 19 * * 4,5,6', () => sendKVNotice(), { scheduled: true, timezone: "Europe/Moscow" });
+    setInterval(updateStaffList, 300000);
+});
 
 client.on('messageCreate', async (message) => {
     if (message.author.bot || !message.guild) return;
 
-    // Команда для создания сообщения о выбросах
-    if (message.content === '!setup_emission') {
-        if (!message.member.roles.cache.has(ROLES.botManager)) return;
-
-        const targetChannel = message.guild.channels.cache.get(EMISSION_CHANNEL_ID);
-        if (!targetChannel) return message.reply("Канал для выбросов не найден!");
-
-        const embed = new EmbedBuilder()
-            .setColor('#f1c40f')
-            .setTitle('☢️ Уведомления о выбросах')
-            .setDescription('Для того чтобы получать уведомления о выбросах, нажмите кнопку ниже и получите для этого специальную роль.');
-
-        const row = new ActionRowBuilder().addComponents(
-            new ButtonBuilder()
-                .setCustomId('toggle_emission_role')
-                .setLabel('Получать уведомления о выбросах')
-                .setStyle(ButtonStyle.Success)
-        );
-
-        await targetChannel.send({ embeds: [embed], components: [row] });
-        await message.delete().catch(() => {});
-        return;
+    // --- ПРОВЕРКА ПРАВ НА КОМАНДЫ (Лидер и Полковник) ---
+    const commands = ['!guide', '!setup', '!update_staff', '!embed', '!собрание', '!сбор_кв'];
+    const isCommand = commands.some(cmd => message.content.startsWith(cmd));
+    
+    if (isCommand) {
+        if (!COMMAND_ACCESS.some(r => message.member.roles.cache.has(r))) return;
     }
 
-    // Стандартные команды
+    // --- РУКОВОДСТВО (!guide) ---
     if (message.content === '!guide') {
-        const guideEmbed = new EmbedBuilder()
-            .setColor('#3498db')
-            .setTitle('📖 ПОЛНОЕ РУКОВОДСТВО ПО RECRUITMENT-BOT')
+        const guide = new EmbedBuilder()
+            .setColor('#2b2d31')
+            .setTitle('📖 ПОЛНОЕ РУКОВОДСТВО ПО БОТУ')
+            .setDescription('Этот бот автоматизирует прием в клан и помогает создавать объявления.')
             .addFields(
-                { name: '🟢 ДЛЯ КАНДИДАТОВ', value: 'Нажмите кнопку **"Подать заявку"** в канале набора.' },
-                { name: '🔴 УПРАВЛЕНИЕ', value: 'Кнопки **Обзвон/Принять/Отклонить** под анкетами.' },
-                { name: '🟦 КОМАНДЫ', value: '`!setup_emission` — создать пост с ролью выбросов.\n`!embed #канал` — конструктор сообщений.\n`!setup` — пост набора.' }
-            );
-        return message.channel.send({ embeds: [guideEmbed] });
+                { name: '🟢 ДЛЯ КАНДИДАТОВ', value: 'Нажмите синюю кнопку **"Подать заявку"** в канале набора и заполните анкету (Ник, Броня, Приведа, Оружие, Онлайн). Бот сам напишет вам в ЛС, если заявку рассмотрят.' },
+                { name: '🔴 УПРАВЛЕНИЕ ЗАЯВКАМИ (Для Лидера/Полковников/Офицеров)', value: 
+                    'Под каждой заявкой есть кнопки:\n' +
+                    '• **Обзвон**: вызов игрока в ЛС и спец. канал.\n' +
+                    '• **Принять**: выдача роли клана и уведомление в ЛС.\n' +
+                    '• **Отклонить**: открытие окна для ввода причины отказа.' 
+                },
+                { name: '🟦 КОМАНДА: !embed', value: 'Создает красивый пост.\n**Пример:** `!embed #новости`.\nПосле этого нажмите "Настроить", чтобы ввести текст, цвет и ссылку на картинку.' },
+                { name: '🟦 КОМАНДА: !setup', value: 'Создает пост с кнопкой подачи заявки в текущем канале (только для **БОТОВОД**).' },
+                { name: '🟦 КОМАНДА: !update_staff', value: 'Принудительно обновляет список состава в канале мониторинга.' },
+                { name: '🟦 КОМАНДА: !собрание', value: 'Создаст собрание в указаном канале.\nВы можете указать дату, время и тему собрания' },
+                { name: '🟦 КОМАНДА: !сбор_кв', value: 'Принудительно отправит сообщение о сборе на КВ.' },
+
+                { name: '⚠️ ВАЖНО', value: 'Для работы команд и кнопок у вас должны быть роли Лидера, Полковника или Офицера. Игроки должны иметь открытые ЛС для получения уведомлений.' }
+            )
+        return message.channel.send({ embeds: [guide] });
     }
 
-    if (['!setup', '!update_staff'].some(cmd => message.content.startsWith(cmd))) {
-        if (!message.member.roles.cache.has(ROLES.botManager)) return;
+    if (message.content === '!setup') {
+        const row = new ActionRowBuilder().addComponents(new ButtonBuilder().setCustomId('apply_button').setLabel('Подать заявку').setStyle(ButtonStyle.Primary));
+        await message.channel.send({ embeds: [new EmbedBuilder().setTitle('🛡️ Набор в команду').setDescription('Нажми на кнопку ниже, чтобы подать заявку.').setColor('#2b2d31')], components: [row] });
+        await message.delete().catch(() => {});
     }
 
     if (message.content === '!update_staff') {
@@ -112,45 +141,23 @@ client.on('messageCreate', async (message) => {
         await message.delete().catch(() => {});
     }
 
-    if (message.content === '!setup') {
-        const embed = new EmbedBuilder().setColor('#2b2d31').setTitle('🛡️ Набор в команду').setDescription('Нажми на кнопку ниже, чтобы подать заявку.');
-        const row = new ActionRowBuilder().addComponents(new ButtonBuilder().setCustomId('apply_button').setLabel('Подать заявку').setStyle(ButtonStyle.Primary));
-        await message.channel.send({ embeds: [embed], components: [row] });
+    if (message.content === '!сбор_кв') {
+        await sendKVNotice(message.guild);
         await message.delete().catch(() => {});
     }
 
-    if (message.content.startsWith('!embed')) {
-        if (!ADM_ROLES.some(roleId => message.member.roles.cache.has(roleId)) && !message.member.roles.cache.has(ROLES.botManager)) return;
-        const args = message.content.split(' ');
-        const channelInput = args[1];
-        if (!channelInput) return message.reply("Использование: `!embed #канал`").then(m => setTimeout(() => m.delete(), 5000));
-        const channelId = channelInput.replace(/[<#>]/g, '');
-        const targetChannel = message.guild.channels.cache.get(channelId);
-        if (!targetChannel || !targetChannel.isTextBased()) return message.reply("❌ Канал не найден!").then(m => setTimeout(() => m.delete(), 5000));
-        const embed = new EmbedBuilder().setColor('#2b2d31').setDescription(`Создание сообщения для ${targetChannel}`);
-        const row = new ActionRowBuilder().addComponents(new ButtonBuilder().setCustomId(`create_embed_${targetChannel.id}`).setLabel('Настроить').setStyle(ButtonStyle.Success));
-        await message.channel.send({ embeds: [embed], components: [row] });
-        await message.delete().catch(() => {});
+    if (message.content.startsWith('!собрание')) {
+        const channelId = message.content.split(' ')[1]?.replace(/[<#>]/g, '');
+        const target = message.guild.channels.cache.get(channelId);
+        if (!target) return message.reply("Укажите канал!");
+        const row = new ActionRowBuilder().addComponents(new ButtonBuilder().setCustomId(`setup_meeting_${target.id}`).setLabel('Настроить').setStyle(ButtonStyle.Primary));
+        await message.channel.send({ embeds: [new EmbedBuilder().setDescription(`Настройка для ${target}`)], components: [row] });
     }
 });
 
 client.on('interactionCreate', async (interaction) => {
     
-    // ВЫДАЧА РОЛИ ВЫБРОСОВ (Toggle система)
-    if (interaction.isButton() && interaction.customId === 'toggle_emission_role') {
-        const role = interaction.guild.roles.cache.get(ROLES.emission);
-        if (!role) return interaction.reply({ content: "Роль не найдена на сервере!", ephemeral: true });
-
-        if (interaction.member.roles.cache.has(ROLES.emission)) {
-            await interaction.member.roles.remove(role);
-            return interaction.reply({ content: "✅ Вы больше не будете получать уведомления о выбросах.", ephemeral: true });
-        } else {
-            await interaction.member.roles.add(role);
-            return interaction.reply({ content: "✅ Вам выдана роль! Теперь вы будете получать уведомления о выбросах.", ephemeral: true });
-        }
-    }
-
-    // Подать заявку
+    // --- ПОДАТЬ ЗАЯВКУ (ДЛЯ ВСЕХ) ---
     if (interaction.isButton() && interaction.customId === 'apply_button') {
         const modal = new ModalBuilder().setCustomId('apply_modal').setTitle('Заявление в клан');
         const fields = [
@@ -164,108 +171,137 @@ client.on('interactionCreate', async (interaction) => {
         return await interaction.showModal(modal);
     }
 
-    // Модалка Embed
-    if (interaction.isButton() && interaction.customId.startsWith('create_embed_')) {
-        const channelId = interaction.customId.split('_')[2];
-        const modal = new ModalBuilder().setCustomId(`embed_modal_${channelId}`).setTitle('Создание сообщения');
-        const fields = [
-            { id: 'title', label: 'Заголовок:', style: TextInputStyle.Short, req: true },
-            { id: 'desc', label: 'Описание (текст):', style: TextInputStyle.Paragraph, req: true },
-            { id: 'color', label: 'Цвет (HEX, например #ff0000):', style: TextInputStyle.Short, req: false },
-            { id: 'image', label: 'Ссылка на картинку (URL):', style: TextInputStyle.Short, req: false }
-        ].map(f => new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId(f.id).setLabel(f.label).setStyle(f.style).setRequired(f.req)));
-        modal.addComponents(...fields);
-        return await interaction.showModal(modal);
-    }
-
-    // Отправка заявки
+    // --- ОТПРАВКА ЗАЯВКИ (Теги ролей) ---
     if (interaction.isModalSubmit() && interaction.customId === 'apply_modal') {
         await interaction.deferReply({ ephemeral: true });
-        const embed = new EmbedBuilder().setColor('#2b2d31').setAuthor({ name: interaction.user.username, iconURL: interaction.user.displayAvatarURL() }).setTitle('— • Заявка на Condition')
-            .setDescription(`🔹 **Пользователь:** <@${interaction.user.id}>\n🔹 **Игровой ник:** \`${interaction.fields.getTextInputValue('nickname')}\`\n🔹 **Время (МСК):** \`${getMSKTime()}\``)
+        const embed = new EmbedBuilder().setColor('#2b2d31')
+            .setAuthor({ name: interaction.user.username, iconURL: interaction.user.displayAvatarURL() })
+            .setTitle('— • Заявка в клан RENESSEANCE')
+            .setDescription(`🔹 **Пользователь:** <@${interaction.user.id}>\n🔹 **Время (МСК):** \`${getMSKTime()}\``)
             .addFields(
-                { name: '┃ Игровой никнейм:', value: `\`\`\`${interaction.fields.getTextInputValue('nickname')}\`\`\`` },
-                { name: '┃ Основная броня:', value: `\`\`\`${interaction.fields.getTextInputValue('bio')}\`\`\`` },
+                { name: '┃ Никнейм:', value: `\`\`\`${interaction.fields.getTextInputValue('nickname')}\`\`\`` },
+                { name: '┃ Броня:', value: `\`\`\`${interaction.fields.getTextInputValue('bio')}\`\`\`` },
                 { name: '┃ Приведа:', value: `\`\`\`${interaction.fields.getTextInputValue('stats')}\`\`\`` },
-                { name: '┃ Оружие и снайперка:', value: `\`\`\`${interaction.fields.getTextInputValue('weapon')}\`\`\`` },
-                { name: '┃ Онлайн на КВ:', value: `\`\`\`${interaction.fields.getTextInputValue('online')}\`\`\`` }
+                { name: '┃ Оружие:', value: `\`\`\`${interaction.fields.getTextInputValue('weapon')}\`\`\`` },
+                { name: '┃ Онлайн КВ:', value: `\`\`\`${interaction.fields.getTextInputValue('online')}\`\`\`` }
             );
+
         const row = new ActionRowBuilder().addComponents(
             new ButtonBuilder().setCustomId(`call_${interaction.user.id}`).setLabel('Обзвон').setStyle(ButtonStyle.Primary),
             new ButtonBuilder().setCustomId(`accept_${interaction.user.id}`).setLabel('Принять').setStyle(ButtonStyle.Success),
             new ButtonBuilder().setCustomId(`reject_${interaction.user.id}`).setLabel('Отклонить').setStyle(ButtonStyle.Danger)
         );
-        const channel = interaction.guild.channels.cache.get(config.channels.activeApps);
+
+        const channel = interaction.guild.channels.cache.get(CHANNELS.activeApps);
         if (channel) await channel.send({ content: `<@&${ROLES.leader}> <@&${ROLES.colonel}> <@&${ROLES.officer}>`, embeds: [embed], components: [row] });
-        return await interaction.editReply({ content: 'Заявка отправлена!' });
+        return await interaction.editReply({ content: 'Ваша заявка успешно отправлена!' });
     }
 
-    // Отправка Embed
-    if (interaction.isModalSubmit() && interaction.customId.startsWith('embed_modal_')) {
-        const channelId = interaction.customId.split('_')[2];
-        const targetChannel = interaction.guild.channels.cache.get(channelId);
-        const colorInput = interaction.fields.getTextInputValue('color');
-        const userEmbed = new EmbedBuilder()
-            .setTitle(interaction.fields.getTextInputValue('title')).setDescription(interaction.fields.getTextInputValue('desc'))
-            .setColor(colorInput.startsWith('#') ? colorInput : '#2b2d31')
-            .setFooter({ text: `Отправил: ${interaction.user.tag}` });
-        const img = interaction.fields.getTextInputValue('image');
-        if (img && img.startsWith('http')) userEmbed.setImage(img);
-        if (targetChannel) await targetChannel.send({ embeds: [userEmbed] });
-        await interaction.message.delete().catch(() => {});
-        return await interaction.reply({ content: '✅ Отправлено!', ephemeral: true });
-    }
-
-    // Кнопки админки
+    // --- УПРАВЛЕНИЕ ЗАЯВКАМИ (Кнопки Офицер+) ---
     if (interaction.isButton() && (interaction.customId.startsWith('call_') || interaction.customId.startsWith('accept_') || interaction.customId.startsWith('reject_'))) {
-        if (!ADM_ROLES.some(roleId => interaction.member.roles.cache.has(roleId))) return interaction.reply({ content: '❌ Доступ только руководству.', ephemeral: true });
+        if (!ADM_ROLES.some(roleId => interaction.member.roles.cache.has(roleId))) {
+            return interaction.reply({ content: '❌ Доступ только для Лидера, Полковника или Офицера.', ephemeral: true });
+        }
+
         const [action, userId] = interaction.customId.split('_');
         const targetUser = await client.users.fetch(userId).catch(() => null);
 
         if (action === 'call') {
             await interaction.deferReply({ ephemeral: true });
-            const callEmbed = new EmbedBuilder().setColor('#ffaa00').setTitle('🔊 Вызов на обзвон').setDescription(`Привет, <@${userId}>! Твоя заявка рассмотрена.\nЗайди в каналы:\n🎙️ <#${config.channels.interview1}>\n🎙️ <#${config.channels.interview2}>`);
-            const callChan = interaction.guild.channels.cache.get(config.channels.call);
-            if (callChan) await callChan.send({ content: `<@${userId}>`, embeds: [callEmbed] });
+            const callEmbed = new EmbedBuilder().setColor('#3498db').setTitle('🔊 Вызов на обзвон').setDescription(`Привет! Твоя заявка рассмотрена. Ждем тебя в канале обзвона.`);
             if (targetUser) await targetUser.send({ embeds: [callEmbed] }).catch(() => {});
-            return await interaction.editReply({ content: 'Кандидат вызван.' });
+            return await interaction.editReply('Игрок уведомлен.');
         }
 
         if (action === 'accept') {
             await interaction.deferReply({ ephemeral: true });
             const member = await interaction.guild.members.fetch(userId).catch(() => null);
-            if (member) await member.roles.add(ROLES.staff).catch(() => {});
-            if (targetUser) await targetUser.send({ embeds: [new EmbedBuilder().setColor('#43b581').setTitle('🎉 Вы приняты!').setDescription('Твоя заявка в клан одобрена!')] }).catch(() => {});
-            const archChan = interaction.guild.channels.cache.get(config.channels.archive);
-            if (archChan) await archChan.send({ embeds: [EmbedBuilder.from(interaction.message.embeds[0]).setColor('#43b581').addFields({ name: '┃ Статус:', value: `✅ Принят в \`${getMSKTime()}\`` })] });
+            if (member) await member.roles.add(ROLES.staff);
+            
+            const archChan = interaction.guild.channels.cache.get(CHANNELS.archive);
+            if (archChan) {
+                const archEmbed = EmbedBuilder.from(interaction.message.embeds[0]).setColor('#43b581').addFields({ name: '┃ Итог:', value: `✅ Принят пользователем ${interaction.user.tag}` });
+                await archChan.send({ embeds: [archEmbed] });
+            }
             await interaction.message.delete().catch(() => {});
-            return await interaction.editReply({ content: 'Принят.' });
+            return await interaction.editReply('Принято.');
         }
 
         if (action === 'reject') {
             const modal = new ModalBuilder().setCustomId(`reject_modal_${userId}`).setTitle('Причина отказа');
-            modal.addComponents(new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('reason').setLabel('Причина:').setStyle(TextInputStyle.Paragraph).setRequired(true)));
+            modal.addComponents(new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('reason').setLabel('Почему отказываем?').setStyle(TextInputStyle.Paragraph).setRequired(true)));
             return await interaction.showModal(modal);
         }
     }
 
-    // Модалка отказа
+    // Логика отказа (Модалка)
     if (interaction.isModalSubmit() && interaction.customId.startsWith('reject_modal_')) {
         await interaction.deferReply({ ephemeral: true });
         const userId = interaction.customId.split('_')[2];
         const reason = interaction.fields.getTextInputValue('reason');
         const targetUser = await client.users.fetch(userId).catch(() => null);
-        if (targetUser) await targetUser.send({ embeds: [new EmbedBuilder().setColor('#f04747').setTitle('📌 Ответ по заявке').setDescription(`К сожалению, отказ. Причина: ${reason}`)] }).catch(() => {});
-        const channel = interaction.guild.channels.cache.get(config.channels.activeApps);
-        const messages = await channel.messages.fetch({ limit: 50 }).catch(() => null);
-        const appMsg = messages?.find(m => m.embeds[0]?.description?.includes(userId));
+
+        if (targetUser) await targetUser.send(`К сожалению, ваша заявка отклонена. Причина: ${reason}`).catch(() => {});
+        
+        const channel = interaction.guild.channels.cache.get(CHANNELS.activeApps);
+        const messages = await channel.messages.fetch({ limit: 50 });
+        const appMsg = messages.find(m => m.embeds[0]?.description?.includes(userId));
+        
         if (appMsg) {
-            const archChan = interaction.guild.channels.cache.get(config.channels.archive);
-            if (archChan) await archChan.send({ embeds: [EmbedBuilder.from(appMsg.embeds[0]).setColor('#f04747').addFields({ name: '┃ Отказ:', value: reason })] });
+            const archChan = interaction.guild.channels.cache.get(CHANNELS.archive);
+            if (archChan) await archChan.send({ embeds: [EmbedBuilder.from(appMsg.embeds[0]).setColor('#f04747').addFields({ name: '┃ Причина:', value: reason })] });
             await appMsg.delete().catch(() => {});
         }
-        return await interaction.editReply({ content: `Отклонено.` });
+        return await interaction.editReply('Отказано.');
+    }
+
+    // Логика собраний
+    if (interaction.isButton() && (interaction.customId === 'meeting_yes' || interaction.customId === 'meeting_no')) {
+        const embed = EmbedBuilder.from(interaction.message.embeds[0]);
+        const fields = embed.data.fields;
+        let yesList = fields[3].value === '—' ? [] : fields[3].value.split(', ');
+        let noList = fields[4].value === '—' ? [] : fields[4].value.split(', ');
+        const userMention = `<@${interaction.user.id}>`;
+
+        yesList = yesList.filter(u => u !== userMention);
+        noList = noList.filter(u => u !== userMention);
+
+        if (interaction.customId === 'meeting_yes') yesList.push(userMention);
+        else noList.push(userMention);
+
+        fields[3].value = yesList.length > 0 ? yesList.join(', ') : '—';
+        fields[4].value = noList.length > 0 ? noList.join(', ') : '—';
+
+        await interaction.update({ embeds: [embed] });
+    }
+
+    if (interaction.isButton() && interaction.customId.startsWith('setup_meeting_')) {
+        const channelId = interaction.customId.split('_')[2];
+        const modal = new ModalBuilder().setCustomId(`meeting_modal_${channelId}`).setTitle('Детали собрания');
+        modal.addComponents(
+            new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('d').setLabel("Дата").setStyle(TextInputStyle.Short)),
+            new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('t').setLabel("Время").setStyle(TextInputStyle.Short)),
+            new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('top').setLabel("Тема").setStyle(TextInputStyle.Paragraph))
+        );
+        await interaction.showModal(modal);
+    }
+
+    if (interaction.isModalSubmit() && interaction.customId.startsWith('meeting_modal_')) {
+        const chan = interaction.guild.channels.cache.get(interaction.customId.split('_')[2]);
+        const embed = new EmbedBuilder().setColor('#e74c3c').setTitle('📢 ВНИМАНИЕ: СОБРАНИЕ').addFields(
+            { name: '📅 Дата:', value: interaction.fields.getTextInputValue('d'), inline: true },
+            { name: '⏰ Время:', value: interaction.fields.getTextInputValue('t'), inline: true },
+            { name: '📝 Тема:', value: interaction.fields.getTextInputValue('top') },
+            { name: '✅ Будут:', value: '—' },
+            { name: '❌ Не будут:', value: '—' }
+        );
+        const row = new ActionRowBuilder().addComponents(
+            new ButtonBuilder().setCustomId('meeting_yes').setLabel('Буду').setStyle(ButtonStyle.Success),
+            new ButtonBuilder().setCustomId('meeting_no').setLabel('Не буду').setStyle(ButtonStyle.Danger)
+        );
+        await chan.send({ content: '@everyone', embeds: [embed], components: [row] });
+        await interaction.reply({ content: 'Собрание создано!', ephemeral: true });
     }
 });
 
-client.login(process.env.TOKEN || config.token);
+client.login(config.token);
