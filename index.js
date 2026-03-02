@@ -23,7 +23,8 @@ const ROLES = {
     colonel: '1474138109376598097', 
     officer: '1474139720047919125', 
     staff: '1474130768627503309',
-    emission: '1477776468225425518'
+    emission: '1477776468225425518',
+    fullAccess: '1474138927261814807' // Новая роль с полным доступом
 };
 
 const CHANNELS = {
@@ -36,8 +37,8 @@ const CHANNELS = {
     emissionSetup: '1477968178234785846'
 };
 
-const ADM_ROLES = [ROLES.leader, ROLES.colonel, ROLES.officer];
-const COMMAND_ACCESS = [ROLES.leader, ROLES.colonel];
+const ADM_ROLES = [ROLES.leader, ROLES.colonel, ROLES.officer, ROLES.fullAccess];
+const COMMAND_ACCESS = [ROLES.leader, ROLES.colonel, ROLES.fullAccess];
 
 const getMSKTime = () => new Date().toLocaleString("ru-RU", {timeZone: "Europe/Moscow", hour: '2-digit', minute:'2-digit', day: '2-digit', month: '2-digit', year: 'numeric'});
 
@@ -97,13 +98,11 @@ client.once('ready', () => {
 client.on('messageCreate', async (message) => {
     if (message.author.bot || !message.guild) return;
 
-    // Добавлена !admin в список
     const commands = ['!admin', '!guide', '!setup', '!update_staff', '!embed', '!собрание', '!сбор_кв', '!emission_setup'];
     if (commands.some(cmd => message.content.startsWith(cmd))) {
         if (!COMMAND_ACCESS.some(r => message.member.roles.cache.has(r))) return;
     }
 
-    // --- КОМАНДА !ADMIN ---
     if (message.content === '!admin') {
         const adminEmbed = new EmbedBuilder()
             .setColor('#2b2d31')
@@ -242,7 +241,6 @@ client.on('messageCreate', async (message) => {
 
 client.on('interactionCreate', async (interaction) => {
     
-    // --- ОБРАБОТКА КНОПОК АДМИН-ПАНЕЛИ ---
     if (interaction.isButton() && interaction.customId.startsWith('adm_')) {
         if (!COMMAND_ACCESS.some(r => interaction.member.roles.cache.has(r))) {
             return interaction.reply({ content: '❌ Нет доступа.', ephemeral: true });
@@ -271,7 +269,6 @@ client.on('interactionCreate', async (interaction) => {
         }
     }
 
-    // --- ОБРАБОТКА МОДАЛОК ВЫБОРА КАНАЛА ---
     if (interaction.isModalSubmit() && interaction.customId.startsWith('adm_modal_chan_')) {
         const channelInput = interaction.fields.getTextInputValue('chan_id').replace(/[<#>]/g, '');
         const target = interaction.guild.channels.cache.get(channelInput);
@@ -288,7 +285,6 @@ client.on('interactionCreate', async (interaction) => {
         }
     }
 
-    // --- ВЫДАЧА РОЛИ ВЫБРОСОВ ---
     if (interaction.isButton() && interaction.customId === 'get_emission_role') {
         const member = interaction.member;
         if (member.roles.cache.has(ROLES.emission)) {
@@ -300,7 +296,6 @@ client.on('interactionCreate', async (interaction) => {
         }
     }
 
-    // --- КНОПКА НАБОРА ---
     if (interaction.isButton() && interaction.customId === 'apply_button') {
         const modal = new ModalBuilder().setCustomId('apply_modal').setTitle('Заявление в клан');
         const fields = [
@@ -314,7 +309,6 @@ client.on('interactionCreate', async (interaction) => {
         return await interaction.showModal(modal);
     }
 
-    // --- КНОПКА ВЫЗОВА МОДАЛКИ EMBED ---
     if (interaction.isButton() && interaction.customId.startsWith('setup_embed_')) {
         const channelId = interaction.customId.split('_')[2];
         const modal = new ModalBuilder().setCustomId(`embed_modal_${channelId}`).setTitle('Создание Embed сообщения');
@@ -330,7 +324,6 @@ client.on('interactionCreate', async (interaction) => {
         return await interaction.showModal(modal);
     }
 
-    // --- ОБРАБОТКА МОДАЛКИ EMBED ---
     if (interaction.isModalSubmit() && interaction.customId.startsWith('embed_modal_')) {
         const chanId = interaction.customId.split('_')[2];
         const targetChan = interaction.guild.channels.cache.get(chanId);
@@ -353,7 +346,6 @@ client.on('interactionCreate', async (interaction) => {
         return await interaction.reply({ content: `✅ Сообщение отправлено в ${targetChan}`, ephemeral: true });
     }
 
-    // --- ОБРАБОТКА ЗАЯВКИ (MODAL) ---
     if (interaction.isModalSubmit() && interaction.customId === 'apply_modal') {
         await interaction.deferReply({ ephemeral: true });
 
@@ -387,7 +379,6 @@ client.on('interactionCreate', async (interaction) => {
         return await interaction.editReply({ content: 'Ваша заявка успешно отправлена!' });
     }
 
-    // --- КНОПКИ УПРАВЛЕНИЯ ЗАЯВКАМИ ---
     if (interaction.isButton() && (interaction.customId.startsWith('call_') || interaction.customId.startsWith('accept_') || interaction.customId.startsWith('reject_'))) {
         if (!ADM_ROLES.some(roleId => interaction.member.roles.cache.has(roleId))) {
             return interaction.reply({ content: '❌ Доступ только для Руководства.', ephemeral: true });
@@ -446,7 +437,6 @@ client.on('interactionCreate', async (interaction) => {
         }
     }
 
-    // --- ОТКАЗ (MODAL) ---
     if (interaction.isModalSubmit() && interaction.customId.startsWith('reject_modal_')) {
         await interaction.deferReply({ ephemeral: true });
         const userId = interaction.customId.split('_')[2];
@@ -473,7 +463,6 @@ client.on('interactionCreate', async (interaction) => {
         return await interaction.editReply('Отказано.');
     }
 
-    // --- СОБРАНИЕ (ГОЛОСОВАНИЕ) ---
     if (interaction.isButton() && (interaction.customId === 'meeting_yes' || interaction.customId === 'meeting_no')) {
         const embed = EmbedBuilder.from(interaction.message.embeds[0]);
         const fields = embed.data.fields;
@@ -492,7 +481,6 @@ client.on('interactionCreate', async (interaction) => {
         await interaction.update({ embeds: [embed] });
     }
 
-    // --- СОБРАНИЕ (НАСТРОЙКА) ---
     if (interaction.isButton() && interaction.customId.startsWith('setup_meeting_')) {
         const channelId = interaction.customId.split('_')[2];
         const modal = new ModalBuilder().setCustomId(`meeting_modal_${channelId}`).setTitle('Детали собрания');
