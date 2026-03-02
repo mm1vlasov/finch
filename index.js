@@ -22,7 +22,8 @@ const ROLES = {
     leader: '1474847275715920074', 
     colonel: '1474138109376598097', 
     officer: '1474139720047919125', 
-    staff: '1474130768627503309'
+    staff: '1474130768627503309',
+    emission: '1477776468225425518' // Роль для уведомлений о выбросах
 };
 
 const CHANNELS = {
@@ -31,7 +32,8 @@ const CHANNELS = {
     kvVoice: '1474135459633430600',
     activeApps: config.channels.activeApps, 
     archive: config.channels.archive,
-    call: config.channels.call
+    call: '1474124765299081288', // Канал для публичного вызова на обзвон
+    emissionSetup: '1477968178234785846' // Канал для настройки роли выбросов
 };
 
 const ADM_ROLES = [ROLES.leader, ROLES.colonel, ROLES.officer];
@@ -95,9 +97,27 @@ client.once('ready', () => {
 client.on('messageCreate', async (message) => {
     if (message.author.bot || !message.guild) return;
 
-    const commands = ['!guide', '!setup', '!update_staff', '!embed', '!собрание', '!сбор_кв'];
+    const commands = ['!guide', '!setup', '!update_staff', '!embed', '!собрание', '!сбор_кв', '!emission_setup'];
     if (commands.some(cmd => message.content.startsWith(cmd))) {
         if (!COMMAND_ACCESS.some(r => message.member.roles.cache.has(r))) return;
+    }
+
+    // Настройка канала выбросов
+    if (message.content === '!emission_setup') {
+        const embed = new EmbedBuilder()
+            .setColor('#2b2d31')
+            .setTitle('☢️ Уведомления о выбросах')
+            .setDescription('Для того чтобы получать уведомления о выбросах, нажмите кнопку ниже и получите для этого специальную роль.');
+        
+        const row = new ActionRowBuilder().addComponents(
+            new ButtonBuilder()
+                .setCustomId('get_emission_role')
+                .setLabel('Получить уведомления о выбросах')
+                .setStyle(ButtonStyle.Secondary)
+        );
+
+        await message.channel.send({ embeds: [embed], components: [row] });
+        await message.delete().catch(() => {});
     }
 
     if (message.content === '!guide') {
@@ -107,8 +127,8 @@ client.on('messageCreate', async (message) => {
             .setDescription('Этот бот автоматизирует прием в клан и помогает создавать объявления.')
             .addFields(
                 { name: '🟢 ДЛЯ КАНДИДАТОВ', value: 'Нажмите синюю кнопку **"Подать заявку"** в канале набора и заполните анкету. Бот сам напишет вам в ЛС, если заявку рассмотрят.' },
-                { name: '🔴 УПРАВЛЕНИЕ ЗАЯВКАМИ', value: '• **Обзвон**: вызов в ЛС и спец. канал.\n• **Принять**: выдача роли и архив.\n• **Отклонить**: указание причины.' },
-                { name: '🟦 КОМАНДЫ', value: '`!setup` — кнопка набора\n`!сбор_кв` — анонс КВ\n`!собрание #канал` — создать опрос' }
+                { name: '🔴 УПРАВЛЕНИЕ ЗАЯВКАМИ', value: '• **Обзвон**: вызов в ЛС и канал <#1474124765299081288>.\n• **Принять**: выдача роли и архив.\n• **Отклонить**: указание причины.' },
+                { name: '🟦 КОМАНДЫ', value: '`!setup` — кнопка набора\n`!сбор_кв` — анонс КВ\n`!собрание #канал` — создать опрос\n`!emission_setup` — создать пост с ролью выбросов' }
             );
         return message.channel.send({ embeds: [guide] });
     }
@@ -140,6 +160,18 @@ client.on('messageCreate', async (message) => {
 
 client.on('interactionCreate', async (interaction) => {
     
+    // --- ВЫДАЧА РОЛИ ВЫБРОСОВ ---
+    if (interaction.isButton() && interaction.customId === 'get_emission_role') {
+        const member = interaction.member;
+        if (member.roles.cache.has(ROLES.emission)) {
+            await member.roles.remove(ROLES.emission);
+            return await interaction.reply({ content: 'Роль уведомлений о выбросах удалена.', ephemeral: true });
+        } else {
+            await member.roles.add(ROLES.emission);
+            return await interaction.reply({ content: 'Роль уведомлений о выбросах выдана!', ephemeral: true });
+        }
+    }
+
     if (interaction.isButton() && interaction.customId === 'apply_button') {
         const modal = new ModalBuilder().setCustomId('apply_modal').setTitle('Заявление в клан');
         const fields = [
@@ -196,8 +228,21 @@ client.on('interactionCreate', async (interaction) => {
 
         if (action === 'call') {
             await interaction.deferReply({ ephemeral: true });
-            const callEmbed = new EmbedBuilder().setColor('#ffaa00').setTitle('🔊 Приглашение на обзвон').setDescription(`Привет! Твоя заявка рассмотрена. Ждем тебя в канале обзвона <#${CHANNELS.call}>.`);
-            if (targetUser) await targetUser.send({ embeds: [callEmbed] }).catch(() => {});
+            
+            const callEmbed = new EmbedBuilder()
+                .setColor('#f1c40f')
+                .setAuthor({ name: 'RENESSEANCE', iconURL: interaction.guild.iconURL() })
+                .setTitle('🔊 Приглашение на обзвон')
+                .setDescription(`Привет, <@${userId}>! Твоя заявка рассмотрена.\n\nМы приглашаем тебя на обзвон. Пожалуйста, зайди в любой из доступных каналов ниже, когда будешь готов:\n\n🎙️ <#1474135459633430600> | Обзвон #1\n🎙️ <#1474135459633430600> | Обзвон #2\n\n**Время вызова (МСК):** \`${getMSKTime()}\`\n\n**Ожидаем тебя!**`)
+                .setFooter({ text: 'Recruitment System' });
+
+            // Отправка в специальный канал
+            const callChan = interaction.guild.channels.cache.get(CHANNELS.call);
+            if (callChan) await callChan.send({ content: `<@${userId}>`, embeds: [callEmbed] });
+
+            // Отправка в ЛС
+            if (targetUser) await targetUser.send({ embeds: [callEmbed] }).catch(() => console.log('ЛС пользователя закрыто'));
+
             return await interaction.editReply('Кандидат вызван.');
         }
 
@@ -206,6 +251,15 @@ client.on('interactionCreate', async (interaction) => {
             const member = await interaction.guild.members.fetch(userId).catch(() => null);
             if (member) await member.roles.add(ROLES.staff);
             
+            if (targetUser) {
+                const acceptDM = new EmbedBuilder()
+                    .setColor('#2ecc71')
+                    .setTitle('🎉 Поздравляем!')
+                    .setDescription(`Твоя заявка в клан **RENESSEANCE** была одобрена!\nТебе выдана роль <@&${ROLES.staff}>. Ознакомься с правилами и информационными каналами.`)
+                    .setTimestamp();
+                await targetUser.send({ embeds: [acceptDM] }).catch(() => {});
+            }
+
             const archChan = interaction.guild.channels.cache.get(CHANNELS.archive);
             if (archChan) {
                 const archEmbed = EmbedBuilder.from(interaction.message.embeds[0])
@@ -231,7 +285,14 @@ client.on('interactionCreate', async (interaction) => {
         const reason = interaction.fields.getTextInputValue('reason');
         const targetUser = await client.users.fetch(userId).catch(() => null);
 
-        if (targetUser) await targetUser.send(`К сожалению, ваша заявка отклонена.\nПричина: ${reason}`).catch(() => {});
+        if (targetUser) {
+            const rejectDM = new EmbedBuilder()
+                .setColor('#e74c3c')
+                .setTitle('Ответ по заявке')
+                .setDescription(`К сожалению, твоя заявка в клан **RENESSEANCE** была отклонена.\n\n**Причина:** \`${reason}\``)
+                .setFooter({ text: 'Попробуйте подать заявку позже.' });
+            await targetUser.send({ embeds: [rejectDM] }).catch(() => {});
+        }
         
         const archChan = interaction.guild.channels.cache.get(CHANNELS.archive);
         if (archChan && interaction.message) {
@@ -245,7 +306,7 @@ client.on('interactionCreate', async (interaction) => {
         return await interaction.editReply('Отказано.');
     }
 
-    // Логика собраний (остается прежней)
+    // Логика собраний
     if (interaction.isButton() && (interaction.customId === 'meeting_yes' || interaction.customId === 'meeting_no')) {
         const embed = EmbedBuilder.from(interaction.message.embeds[0]);
         const fields = embed.data.fields;
@@ -273,7 +334,8 @@ client.on('interactionCreate', async (interaction) => {
     }
 
     if (interaction.isModalSubmit() && interaction.customId.startsWith('meeting_modal_')) {
-        const chan = interaction.guild.channels.cache.get(interaction.customId.split('_')[2]);
+        const chanId = interaction.customId.split('_')[2];
+        const chan = interaction.guild.channels.cache.get(chanId);
         const embed = new EmbedBuilder().setColor('#e74c3c').setTitle('📢 ВНИМАНИЕ: СОБРАНИЕ').addFields(
             { name: '📅 Дата:', value: interaction.fields.getTextInputValue('d'), inline: true },
             { name: '⏰ Время:', value: interaction.fields.getTextInputValue('t'), inline: true },
@@ -285,7 +347,9 @@ client.on('interactionCreate', async (interaction) => {
             new ButtonBuilder().setCustomId('meeting_yes').setLabel('Буду').setStyle(ButtonStyle.Success),
             new ButtonBuilder().setCustomId('meeting_no').setLabel('Не буду').setStyle(ButtonStyle.Danger)
         );
-        await chan.send({ content: '@everyone', embeds: [embed], components: [row] });
+        
+        // Тегается роль 1474130768627503309 вместо everyone
+        await chan.send({ content: `<@&1474130768627503309>`, embeds: [embed], components: [row] });
         await interaction.reply({ content: 'Собрание создано!', ephemeral: true });
     }
 });
