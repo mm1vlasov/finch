@@ -22,51 +22,32 @@ const ROLES = {
     leader: '1474847275715920074', 
     colonel: '1474138109376598097', 
     officer: '1474139720047919125', 
-    staff: '1474130768627503309',
-    emission: '1477776468225425518'
+    staff: '1474130768627503309'
 };
 
 const CHANNELS = {
     staffList: '1474147428239278221',
-    emission: '1477968178234785846',
     kvNotice: '1474137748628836444', 
     kvVoice: '1474135459633430600',
     activeApps: config.channels.activeApps, 
-    archive: config.channels.archive       
+    archive: config.channels.archive,
+    call: config.channels.call
 };
 
-// Списки доступа
-const ADM_ROLES = [ROLES.leader, ROLES.colonel, ROLES.officer]; // Кто рассматривает заявки (кнопки)
-const COMMAND_ACCESS = [ROLES.leader, ROLES.colonel]; // Кто использует команды бота (!setup, !embed и др.)
+const ADM_ROLES = [ROLES.leader, ROLES.colonel, ROLES.officer];
+const COMMAND_ACCESS = [ROLES.leader, ROLES.colonel];
 
 const getMSKTime = () => new Date().toLocaleString("ru-RU", {timeZone: "Europe/Moscow", hour: '2-digit', minute:'2-digit', day: '2-digit', month: '2-digit', year: 'numeric'});
-
-// --- АВТОМАТИЗАЦИЯ КВ ---
-async function sendKVNotice(manualGuild = null) {
-    const guild = manualGuild || client.guilds.cache.first();
-    if (!guild) return;
-    const channel = guild.channels.cache.get(CHANNELS.kvNotice);
-    if (!channel) return;
-
-    const embed = new EmbedBuilder()
-        .setColor('#cc0000')
-        .setTitle('⚔️ ОБЩИЙ СБОР НА КЛАНОВЫЕ ВОЙНЫ')
-        .setDescription(`Бойцы, пора в бой! Собираемся в голосовом канале.\n\n📍 **Место:** [ЗАЙТИ В ГОЛОСОВОЙ КАНАЛ](https://discord.com/channels/${guild.id}/${CHANNELS.kvVoice})`)
-        .addFields({ name: '⏰ Время:', value: '`19:30 МСК`' })
-        .setImage('https://i.imgur.com/uG9pYpY.png')
-        .setTimestamp();
-
-    await channel.send({ content: `<@&${ROLES.staff}>`, embeds: [embed] });
-}
 
 // --- МОНИТОРИНГ СОСТАВА ---
 async function updateStaffList() {
     try {
         const guild = client.guilds.cache.first();
-        if (!guild || !guild.channels.cache.has(CHANNELS.staffList)) return;
+        if (!guild) return;
         const staffChannel = guild.channels.cache.get(CHANNELS.staffList);
-        await guild.members.fetch();
+        if (!staffChannel) return;
 
+        await guild.members.fetch();
         const createEmbed = (roleId, title) => {
             const role = guild.roles.cache.get(roleId);
             const content = (role && role.members.size > 0) 
@@ -81,11 +62,28 @@ async function updateStaffList() {
             createEmbed(ROLES.staff, 'Staff')
         ];
 
-        const messages = await staffChannel.messages.fetch({ limit: 10 });
-        const botMsg = messages.find(m => m.author.id === client.user.id);
+        const messages = await staffChannel.messages.fetch({ limit: 10 }).catch(() => null);
+        const botMsg = messages?.find(m => m.author.id === client.user.id);
         if (botMsg) await botMsg.edit({ embeds });
         else await staffChannel.send({ embeds });
     } catch (e) { console.error(e); }
+}
+
+// --- АВТОМАТИЗАЦИЯ КВ ---
+async function sendKVNotice(manualGuild = null) {
+    const guild = manualGuild || client.guilds.cache.first();
+    if (!guild) return;
+    const channel = guild.channels.cache.get(CHANNELS.kvNotice);
+    if (!channel) return;
+
+    const embed = new EmbedBuilder()
+        .setColor('#cc0000')
+        .setTitle('⚔️ ОБЩИЙ СБОР НА КЛАНОВЫЕ ВОЙНЫ')
+        .setDescription(`Бойцы, пора в бой! Собираемся в голосовом канале.\n\n📍 **Место:** [ЗАЙТИ В ГОЛОСОВОЙ КАНАЛ](https://discord.com/channels/${guild.id}/${CHANNELS.kvVoice})`)
+        .addFields({ name: '⏰ Время:', value: '`19:30 МСК`' })
+        .setTimestamp();
+
+    await channel.send({ content: `<@&${ROLES.staff}>`, embeds: [embed] });
 }
 
 client.once('ready', () => {
@@ -97,36 +95,21 @@ client.once('ready', () => {
 client.on('messageCreate', async (message) => {
     if (message.author.bot || !message.guild) return;
 
-    // --- ПРОВЕРКА ПРАВ НА КОМАНДЫ (Лидер и Полковник) ---
     const commands = ['!guide', '!setup', '!update_staff', '!embed', '!собрание', '!сбор_кв'];
-    const isCommand = commands.some(cmd => message.content.startsWith(cmd));
-    
-    if (isCommand) {
+    if (commands.some(cmd => message.content.startsWith(cmd))) {
         if (!COMMAND_ACCESS.some(r => message.member.roles.cache.has(r))) return;
     }
 
-    // --- РУКОВОДСТВО (!guide) ---
     if (message.content === '!guide') {
         const guide = new EmbedBuilder()
             .setColor('#2b2d31')
             .setTitle('📖 ПОЛНОЕ РУКОВОДСТВО ПО БОТУ')
             .setDescription('Этот бот автоматизирует прием в клан и помогает создавать объявления.')
             .addFields(
-                { name: '🟢 ДЛЯ КАНДИДАТОВ', value: 'Нажмите синюю кнопку **"Подать заявку"** в канале набора и заполните анкету (Ник, Броня, Приведа, Оружие, Онлайн). Бот сам напишет вам в ЛС, если заявку рассмотрят.' },
-                { name: '🔴 УПРАВЛЕНИЕ ЗАЯВКАМИ (Для Лидера/Полковников/Офицеров)', value: 
-                    'Под каждой заявкой есть кнопки:\n' +
-                    '• **Обзвон**: вызов игрока в ЛС и спец. канал.\n' +
-                    '• **Принять**: выдача роли клана и уведомление в ЛС.\n' +
-                    '• **Отклонить**: открытие окна для ввода причины отказа.' 
-                },
-                { name: '🟦 КОМАНДА: !embed', value: 'Создает красивый пост.\n**Пример:** `!embed #новости`.\nПосле этого нажмите "Настроить", чтобы ввести текст, цвет и ссылку на картинку.' },
-                { name: '🟦 КОМАНДА: !setup', value: 'Создает пост с кнопкой подачи заявки в текущем канале (только для **БОТОВОД**).' },
-                { name: '🟦 КОМАНДА: !update_staff', value: 'Принудительно обновляет список состава в канале мониторинга.' },
-                { name: '🟦 КОМАНДА: !собрание', value: 'Создаст собрание в указаном канале.\nВы можете указать дату, время и тему собрания' },
-                { name: '🟦 КОМАНДА: !сбор_кв', value: 'Принудительно отправит сообщение о сборе на КВ.' },
-
-                { name: '⚠️ ВАЖНО', value: 'Для работы команд и кнопок у вас должны быть роли Лидера, Полковника или Офицера. Игроки должны иметь открытые ЛС для получения уведомлений.' }
-            )
+                { name: '🟢 ДЛЯ КАНДИДАТОВ', value: 'Нажмите синюю кнопку **"Подать заявку"** в канале набора и заполните анкету. Бот сам напишет вам в ЛС, если заявку рассмотрят.' },
+                { name: '🔴 УПРАВЛЕНИЕ ЗАЯВКАМИ', value: '• **Обзвон**: вызов в ЛС и спец. канал.\n• **Принять**: выдача роли и архив.\n• **Отклонить**: указание причины.' },
+                { name: '🟦 КОМАНДЫ', value: '`!setup` — кнопка набора\n`!сбор_кв` — анонс КВ\n`!собрание #канал` — создать опрос' }
+            );
         return message.channel.send({ embeds: [guide] });
     }
 
@@ -157,7 +140,6 @@ client.on('messageCreate', async (message) => {
 
 client.on('interactionCreate', async (interaction) => {
     
-    // --- ПОДАТЬ ЗАЯВКУ (ДЛЯ ВСЕХ) ---
     if (interaction.isButton() && interaction.customId === 'apply_button') {
         const modal = new ModalBuilder().setCustomId('apply_modal').setTitle('Заявление в клан');
         const fields = [
@@ -171,23 +153,30 @@ client.on('interactionCreate', async (interaction) => {
         return await interaction.showModal(modal);
     }
 
-    // --- ОТПРАВКА ЗАЯВКИ (Теги ролей) ---
     if (interaction.isModalSubmit() && interaction.customId === 'apply_modal') {
         await interaction.deferReply({ ephemeral: true });
-        const embed = new EmbedBuilder().setColor('#2b2d31')
+
+        const embed = new EmbedBuilder()
+            .setColor('#2b2d31')
             .setAuthor({ name: interaction.user.username, iconURL: interaction.user.displayAvatarURL() })
             .setTitle('— • Заявка в клан RENESSEANCE')
-            .setDescription(`🔹 **Пользователь:** <@${interaction.user.id}>\n🔹 **Время (МСК):** \`${getMSKTime()}\``)
+            .setDescription(
+                `🔹 **Пользователь:** <@${interaction.user.id}>\n` +
+                `🔹 **Игровой ник:** \`${interaction.fields.getTextInputValue('nickname')}\`\n` +
+                `🔹 **ID:** \`${interaction.user.id}\`\n` +
+                `🔹 **Присоединился:** ${time(interaction.member.joinedAt, 'D')}\n` +
+                `🔹 **Время подачи (МСК):** \`${getMSKTime()}\``
+            )
             .addFields(
-                { name: '┃ Никнейм:', value: `\`\`\`${interaction.fields.getTextInputValue('nickname')}\`\`\`` },
-                { name: '┃ Броня:', value: `\`\`\`${interaction.fields.getTextInputValue('bio')}\`\`\`` },
+                { name: '┃ Игровой никнейм:', value: `\`\`\`${interaction.fields.getTextInputValue('nickname')}\`\`\`` },
+                { name: '┃ Основная броня:', value: `\`\`\`${interaction.fields.getTextInputValue('bio')}\`\`\`` },
                 { name: '┃ Приведа:', value: `\`\`\`${interaction.fields.getTextInputValue('stats')}\`\`\`` },
-                { name: '┃ Оружие:', value: `\`\`\`${interaction.fields.getTextInputValue('weapon')}\`\`\`` },
-                { name: '┃ Онлайн КВ:', value: `\`\`\`${interaction.fields.getTextInputValue('online')}\`\`\`` }
+                { name: '┃ Оружие и снайперка:', value: `\`\`\`${interaction.fields.getTextInputValue('weapon')}\`\`\`` },
+                { name: '┃ Онлайн на КВ:', value: `\`\`\`${interaction.fields.getTextInputValue('online')}\`\`\`` }
             );
 
         const row = new ActionRowBuilder().addComponents(
-            new ButtonBuilder().setCustomId(`call_${interaction.user.id}`).setLabel('Обзвон').setStyle(ButtonStyle.Primary),
+            new ButtonBuilder().setCustomId(`call_${interaction.user.id}`).setLabel('Вызвать на обзвон').setStyle(ButtonStyle.Primary),
             new ButtonBuilder().setCustomId(`accept_${interaction.user.id}`).setLabel('Принять').setStyle(ButtonStyle.Success),
             new ButtonBuilder().setCustomId(`reject_${interaction.user.id}`).setLabel('Отклонить').setStyle(ButtonStyle.Danger)
         );
@@ -197,10 +186,9 @@ client.on('interactionCreate', async (interaction) => {
         return await interaction.editReply({ content: 'Ваша заявка успешно отправлена!' });
     }
 
-    // --- УПРАВЛЕНИЕ ЗАЯВКАМИ (Кнопки Офицер+) ---
     if (interaction.isButton() && (interaction.customId.startsWith('call_') || interaction.customId.startsWith('accept_') || interaction.customId.startsWith('reject_'))) {
         if (!ADM_ROLES.some(roleId => interaction.member.roles.cache.has(roleId))) {
-            return interaction.reply({ content: '❌ Доступ только для Лидера, Полковника или Офицера.', ephemeral: true });
+            return interaction.reply({ content: '❌ Доступ только для Руководства.', ephemeral: true });
         }
 
         const [action, userId] = interaction.customId.split('_');
@@ -208,9 +196,9 @@ client.on('interactionCreate', async (interaction) => {
 
         if (action === 'call') {
             await interaction.deferReply({ ephemeral: true });
-            const callEmbed = new EmbedBuilder().setColor('#3498db').setTitle('🔊 Вызов на обзвон').setDescription(`Привет! Твоя заявка рассмотрена. Ждем тебя в канале обзвона.`);
+            const callEmbed = new EmbedBuilder().setColor('#ffaa00').setTitle('🔊 Приглашение на обзвон').setDescription(`Привет! Твоя заявка рассмотрена. Ждем тебя в канале обзвона <#${CHANNELS.call}>.`);
             if (targetUser) await targetUser.send({ embeds: [callEmbed] }).catch(() => {});
-            return await interaction.editReply('Игрок уведомлен.');
+            return await interaction.editReply('Кандидат вызван.');
         }
 
         if (action === 'accept') {
@@ -220,7 +208,10 @@ client.on('interactionCreate', async (interaction) => {
             
             const archChan = interaction.guild.channels.cache.get(CHANNELS.archive);
             if (archChan) {
-                const archEmbed = EmbedBuilder.from(interaction.message.embeds[0]).setColor('#43b581').addFields({ name: '┃ Итог:', value: `✅ Принят пользователем ${interaction.user.tag}` });
+                const archEmbed = EmbedBuilder.from(interaction.message.embeds[0])
+                    .setColor('#43b581')
+                    .addFields({ name: '┃ Статус:', value: `✅ Принят в \`${getMSKTime()}\`` })
+                    .setFooter({ text: `Принял: ${interaction.user.tag}` });
                 await archChan.send({ embeds: [archEmbed] });
             }
             await interaction.message.delete().catch(() => {});
@@ -229,49 +220,44 @@ client.on('interactionCreate', async (interaction) => {
 
         if (action === 'reject') {
             const modal = new ModalBuilder().setCustomId(`reject_modal_${userId}`).setTitle('Причина отказа');
-            modal.addComponents(new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('reason').setLabel('Почему отказываем?').setStyle(TextInputStyle.Paragraph).setRequired(true)));
+            modal.addComponents(new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('reason').setLabel('Причина отказа:').setStyle(TextInputStyle.Paragraph).setRequired(true)));
             return await interaction.showModal(modal);
         }
     }
 
-    // Логика отказа (Модалка)
     if (interaction.isModalSubmit() && interaction.customId.startsWith('reject_modal_')) {
         await interaction.deferReply({ ephemeral: true });
         const userId = interaction.customId.split('_')[2];
         const reason = interaction.fields.getTextInputValue('reason');
         const targetUser = await client.users.fetch(userId).catch(() => null);
 
-        if (targetUser) await targetUser.send(`К сожалению, ваша заявка отклонена. Причина: ${reason}`).catch(() => {});
+        if (targetUser) await targetUser.send(`К сожалению, ваша заявка отклонена.\nПричина: ${reason}`).catch(() => {});
         
-        const channel = interaction.guild.channels.cache.get(CHANNELS.activeApps);
-        const messages = await channel.messages.fetch({ limit: 50 });
-        const appMsg = messages.find(m => m.embeds[0]?.description?.includes(userId));
-        
-        if (appMsg) {
-            const archChan = interaction.guild.channels.cache.get(CHANNELS.archive);
-            if (archChan) await archChan.send({ embeds: [EmbedBuilder.from(appMsg.embeds[0]).setColor('#f04747').addFields({ name: '┃ Причина:', value: reason })] });
-            await appMsg.delete().catch(() => {});
+        const archChan = interaction.guild.channels.cache.get(CHANNELS.archive);
+        if (archChan && interaction.message) {
+            const archEmbed = EmbedBuilder.from(interaction.message.embeds[0])
+                .setColor('#f04747')
+                .addFields({ name: '┃ Причина:', value: reason })
+                .setFooter({ text: `Отклонил: ${interaction.user.tag}` });
+            await archChan.send({ embeds: [archEmbed] });
         }
+        if (interaction.message) await interaction.message.delete().catch(() => {});
         return await interaction.editReply('Отказано.');
     }
 
-    // Логика собраний
+    // Логика собраний (остается прежней)
     if (interaction.isButton() && (interaction.customId === 'meeting_yes' || interaction.customId === 'meeting_no')) {
         const embed = EmbedBuilder.from(interaction.message.embeds[0]);
         const fields = embed.data.fields;
         let yesList = fields[3].value === '—' ? [] : fields[3].value.split(', ');
         let noList = fields[4].value === '—' ? [] : fields[4].value.split(', ');
         const userMention = `<@${interaction.user.id}>`;
-
         yesList = yesList.filter(u => u !== userMention);
         noList = noList.filter(u => u !== userMention);
-
         if (interaction.customId === 'meeting_yes') yesList.push(userMention);
         else noList.push(userMention);
-
         fields[3].value = yesList.length > 0 ? yesList.join(', ') : '—';
         fields[4].value = noList.length > 0 ? noList.join(', ') : '—';
-
         await interaction.update({ embeds: [embed] });
     }
 
