@@ -22,7 +22,7 @@ const ROLES = {
     staff: '1474130768627503309'    // Роль Condition
 };
 
-// Список ролей, которые могут рассматривать заявки
+// Список ролей, которые имеют право рассматривать заявки
 const ADM_ROLES = [ROLES.leader, ROLES.colonel, ROLES.officer];
 
 const STAFF_CHANNEL_ID = '1474147428239278221';
@@ -90,6 +90,7 @@ client.on('messageCreate', async (message) => {
 
 client.on('interactionCreate', async (interaction) => {
     
+    // Подать заявку может любой человек
     if (interaction.isButton() && interaction.customId === 'apply_button') {
         const modal = new ModalBuilder().setCustomId('apply_modal').setTitle('Заявление в клан');
         const fields = [
@@ -134,12 +135,19 @@ client.on('interactionCreate', async (interaction) => {
         );
 
         const channel = interaction.guild.channels.cache.get(config.channels.activeApps);
-        if (channel) await channel.send({ content: `<@&${ROLES.leader}> <@&${ROLES.colonel}>`, embeds: [embed], components: [row] });
+        if (channel) {
+            // УПОМИНАНИЕ ЛИДЕРА, ПОЛКОВНИКА И ОФИЦЕРА
+            await channel.send({ 
+                content: `<@&${ROLES.leader}> <@&${ROLES.colonel}> <@&${ROLES.officer}>`, 
+                embeds: [embed], 
+                components: [row] 
+            });
+        }
         return await interaction.editReply({ content: 'Ваша заявка успешно отправлена!' });
     }
 
     if (interaction.isButton() && (interaction.customId.startsWith('call_') || interaction.customId.startsWith('accept_') || interaction.customId.startsWith('reject_'))) {
-        // ПРОВЕРКА ДОСТУПА: Лидер, Полковник или Офицер
+        // ПРОВЕРКА ДОСТУПА: Любая роль из ADM_ROLES
         if (!ADM_ROLES.some(roleId => interaction.member.roles.cache.has(roleId))) {
             return interaction.reply({ content: '❌ Доступ только для Руководства (Лидер/Полковник/Офицер).', ephemeral: true });
         }
