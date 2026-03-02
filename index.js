@@ -97,9 +97,31 @@ client.once('ready', () => {
 client.on('messageCreate', async (message) => {
     if (message.author.bot || !message.guild) return;
 
-    const commands = ['!guide', '!setup', '!update_staff', '!embed', '!собрание', '!сбор_кв', '!emission_setup'];
+    // Добавлена !admin в список
+    const commands = ['!admin', '!guide', '!setup', '!update_staff', '!embed', '!собрание', '!сбор_кв', '!emission_setup'];
     if (commands.some(cmd => message.content.startsWith(cmd))) {
         if (!COMMAND_ACCESS.some(r => message.member.roles.cache.has(r))) return;
+    }
+
+    // --- КОМАНДА !ADMIN ---
+    if (message.content === '!admin') {
+        const adminEmbed = new EmbedBuilder()
+            .setColor('#2b2d31')
+            .setTitle('🛡️ Панель управления')
+            .setDescription('Выберите необходимое действие. Доступно только для Лидера и Полковника.');
+
+        const row1 = new ActionRowBuilder().addComponents(
+            new ButtonBuilder().setCustomId('adm_create_meeting').setLabel('Создать собрание').setStyle(ButtonStyle.Primary),
+            new ButtonBuilder().setCustomId('adm_kv_alert').setLabel('Сбор на КВ').setStyle(ButtonStyle.Danger),
+            new ButtonBuilder().setCustomId('adm_update_staff').setLabel('Обновить состав').setStyle(ButtonStyle.Secondary)
+        );
+
+        const row2 = new ActionRowBuilder().addComponents(
+            new ButtonBuilder().setCustomId('adm_create_embed').setLabel('Создать Embed').setStyle(ButtonStyle.Success)
+        );
+
+        await message.channel.send({ embeds: [adminEmbed], components: [row1, row2] });
+        await message.delete().catch(() => {});
     }
 
     if (message.content === '!emission_setup') {
@@ -203,7 +225,6 @@ client.on('messageCreate', async (message) => {
         await message.channel.send({ embeds: [new EmbedBuilder().setDescription(`Настройка для ${target}`)], components: [row] });
     }
 
-    // --- ЛОГИКА !EMBED ---
     if (message.content.startsWith('!embed')) {
         const channelId = message.content.split(' ')[1]?.replace(/[<#>]/g, '');
         const targetChannel = message.guild.channels.cache.get(channelId);
@@ -221,6 +242,52 @@ client.on('messageCreate', async (message) => {
 
 client.on('interactionCreate', async (interaction) => {
     
+    // --- ОБРАБОТКА КНОПОК АДМИН-ПАНЕЛИ ---
+    if (interaction.isButton() && interaction.customId.startsWith('adm_')) {
+        if (!COMMAND_ACCESS.some(r => interaction.member.roles.cache.has(r))) {
+            return interaction.reply({ content: '❌ Нет доступа.', ephemeral: true });
+        }
+
+        if (interaction.customId === 'adm_kv_alert') {
+            await sendKVNotice(interaction.guild);
+            return interaction.reply({ content: '✅ Сбор на КВ отправлен.', ephemeral: true });
+        }
+
+        if (interaction.customId === 'adm_update_staff') {
+            await updateStaffList();
+            return interaction.reply({ content: '✅ Состав обновлен.', ephemeral: true });
+        }
+
+        if (interaction.customId === 'adm_create_meeting') {
+            const modal = new ModalBuilder().setCustomId('adm_modal_chan_meeting').setTitle('Выбор канала для собрания');
+            modal.addComponents(new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('chan_id').setLabel('Введите ID канала или упомяните его').setStyle(TextInputStyle.Short).setRequired(true)));
+            return await interaction.showModal(modal);
+        }
+
+        if (interaction.customId === 'adm_create_embed') {
+            const modal = new ModalBuilder().setCustomId('adm_modal_chan_embed').setTitle('Выбор канала для Embed');
+            modal.addComponents(new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('chan_id').setLabel('Введите ID канала или упомяните его').setStyle(TextInputStyle.Short).setRequired(true)));
+            return await interaction.showModal(modal);
+        }
+    }
+
+    // --- ОБРАБОТКА МОДАЛОК ВЫБОРА КАНАЛА ---
+    if (interaction.isModalSubmit() && interaction.customId.startsWith('adm_modal_chan_')) {
+        const channelInput = interaction.fields.getTextInputValue('chan_id').replace(/[<#>]/g, '');
+        const target = interaction.guild.channels.cache.get(channelInput);
+        if (!target) return interaction.reply({ content: '❌ Канал не найден.', ephemeral: true });
+
+        if (interaction.customId === 'adm_modal_chan_meeting') {
+            const row = new ActionRowBuilder().addComponents(new ButtonBuilder().setCustomId(`setup_meeting_${target.id}`).setLabel('Перейти к настройке').setStyle(ButtonStyle.Primary));
+            return interaction.reply({ content: `Настройка собрания для канала ${target}`, components: [row], ephemeral: true });
+        }
+
+        if (interaction.customId === 'adm_modal_chan_embed') {
+            const row = new ActionRowBuilder().addComponents(new ButtonBuilder().setCustomId(`setup_embed_${target.id}`).setLabel('Перейти к настройке').setStyle(ButtonStyle.Primary));
+            return interaction.reply({ content: `Настройка Embed для канала ${target}`, components: [row], ephemeral: true });
+        }
+    }
+
     // --- ВЫДАЧА РОЛИ ВЫБРОСОВ ---
     if (interaction.isButton() && interaction.customId === 'get_emission_role') {
         const member = interaction.member;
