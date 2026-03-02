@@ -19,11 +19,13 @@ const ROLES = {
     leader: '1474847275715920074',
     colonel: '1474138109376598097', 
     officer: '1474139720047919125',
-    staff: '1474130768627503309' 
+    staff: '1474130768627503309',
+    emission: '1477776468225425518' // Роль уведомлений о выбросах
 };
 
 const ADM_ROLES = [ROLES.leader, ROLES.colonel, ROLES.officer];
 const STAFF_CHANNEL_ID = '1474147428239278221';
+const EMISSION_CHANNEL_ID = '1477968178234785846'; // Канал для сообщения о выбросах
 
 const getMSKTime = () => {
     return new Date().toLocaleString("ru-RU", {timeZone: "Europe/Moscow", hour: '2-digit', minute:'2-digit', day: '2-digit', month: '2-digit', year: 'numeric'});
@@ -63,22 +65,41 @@ async function updateStaffList() {
 
 client.on('messageCreate', async (message) => {
     if (message.author.bot || !message.guild) return;
-    
-    // КОМАНДА !GUIDE (ПОДРОБНОЕ РУКОВОДСТВО)
+
+    // Команда для создания сообщения о выбросах
+    if (message.content === '!setup_emission') {
+        if (!message.member.roles.cache.has(ROLES.botManager)) return;
+
+        const targetChannel = message.guild.channels.cache.get(EMISSION_CHANNEL_ID);
+        if (!targetChannel) return message.reply("Канал для выбросов не найден!");
+
+        const embed = new EmbedBuilder()
+            .setColor('#f1c40f')
+            .setTitle('☢️ Уведомления о выбросах')
+            .setDescription('Для того чтобы получать уведомления о выбросах, нажмите кнопку ниже и получите для этого специальную роль.');
+
+        const row = new ActionRowBuilder().addComponents(
+            new ButtonBuilder()
+                .setCustomId('toggle_emission_role')
+                .setLabel('Получать уведомления о выбросах')
+                .setStyle(ButtonStyle.Success)
+        );
+
+        await targetChannel.send({ embeds: [embed], components: [row] });
+        await message.delete().catch(() => {});
+        return;
+    }
+
+    // Стандартные команды
     if (message.content === '!guide') {
         const guideEmbed = new EmbedBuilder()
             .setColor('#3498db')
             .setTitle('📖 ПОЛНОЕ РУКОВОДСТВО ПО RECRUITMENT-BOT')
-            .setDescription('Этот бот автоматизирует прием в клан и помогает создавать объявления.')
             .addFields(
-                { name: '🟢 ДЛЯ КАНДИДАТОВ', value: 'Нажмите синюю кнопку **"Подать заявку"** в канале набора и заполните анкету (Ник, Броня, Приведа, Оружие, Онлайн). Бот сам напишет вам в ЛС, если заявку рассмотрят.' },
-                { name: '🔴 УПРАВЛЕНИЕ ЗАЯВКАМИ (Для Лидера/Полковников/Офицеров)', value: 'Под каждой заявкой есть кнопки:\n• **Обзвон**: вызов игрока в ЛС и спец. канал.\n• **Принять**: выдача роли клана и уведомление в ЛС.\n• **Отклонить**: открытие окна для ввода причины отказа.' },
-                { name: '🟦 КОМАНДА: !embed', value: 'Создает красивый пост.\n**Пример:** `!embed #новости` или `!embed 1234567890(ID канала)`.\nПосле этого нажмите "Настроить", чтобы ввести текст, цвет и ссылку на картинку.' },
-                { name: '🟦 КОМАНДА: !setup', value: 'Создает пост с кнопкой подачи заявки в текущем канале (только для БОТОВОД).' },
-                { name: '🟦 КОМАНДА: !update_staff', value: 'Принудительно обновляет список состава в канале мониторинга.' },
-                { name: '⚠️ ВАЖНО', value: 'Для работы команд и кнопок у вас должны быть роли Лидера, Полковника или Офицера. Игроки должны иметь открытые ЛС для получения уведомлений.' }
-            )
-            .setFooter({ text: 'Recruitment System | Все права защищены' });
+                { name: '🟢 ДЛЯ КАНДИДАТОВ', value: 'Нажмите кнопку **"Подать заявку"** в канале набора.' },
+                { name: '🔴 УПРАВЛЕНИЕ', value: 'Кнопки **Обзвон/Принять/Отклонить** под анкетами.' },
+                { name: '🟦 КОМАНДЫ', value: '`!setup_emission` — создать пост с ролью выбросов.\n`!embed #канал` — конструктор сообщений.\n`!setup` — пост набора.' }
+            );
         return message.channel.send({ embeds: [guideEmbed] });
     }
 
@@ -102,7 +123,7 @@ client.on('messageCreate', async (message) => {
         if (!ADM_ROLES.some(roleId => message.member.roles.cache.has(roleId)) && !message.member.roles.cache.has(ROLES.botManager)) return;
         const args = message.content.split(' ');
         const channelInput = args[1];
-        if (!channelInput) return message.reply("Укажите канал: `!embed #канал`").then(m => setTimeout(() => m.delete(), 5000));
+        if (!channelInput) return message.reply("Использование: `!embed #канал`").then(m => setTimeout(() => m.delete(), 5000));
         const channelId = channelInput.replace(/[<#>]/g, '');
         const targetChannel = message.guild.channels.cache.get(channelId);
         if (!targetChannel || !targetChannel.isTextBased()) return message.reply("❌ Канал не найден!").then(m => setTimeout(() => m.delete(), 5000));
@@ -115,7 +136,21 @@ client.on('messageCreate', async (message) => {
 
 client.on('interactionCreate', async (interaction) => {
     
-    // Кнопка подачи заявки
+    // ВЫДАЧА РОЛИ ВЫБРОСОВ (Toggle система)
+    if (interaction.isButton() && interaction.customId === 'toggle_emission_role') {
+        const role = interaction.guild.roles.cache.get(ROLES.emission);
+        if (!role) return interaction.reply({ content: "Роль не найдена на сервере!", ephemeral: true });
+
+        if (interaction.member.roles.cache.has(ROLES.emission)) {
+            await interaction.member.roles.remove(role);
+            return interaction.reply({ content: "✅ Вы больше не будете получать уведомления о выбросах.", ephemeral: true });
+        } else {
+            await interaction.member.roles.add(role);
+            return interaction.reply({ content: "✅ Вам выдана роль! Теперь вы будете получать уведомления о выбросах.", ephemeral: true });
+        }
+    }
+
+    // Подать заявку
     if (interaction.isButton() && interaction.customId === 'apply_button') {
         const modal = new ModalBuilder().setCustomId('apply_modal').setTitle('Заявление в клан');
         const fields = [
@@ -129,7 +164,7 @@ client.on('interactionCreate', async (interaction) => {
         return await interaction.showModal(modal);
     }
 
-    // Кнопка настройки Embed
+    // Модалка Embed
     if (interaction.isButton() && interaction.customId.startsWith('create_embed_')) {
         const channelId = interaction.customId.split('_')[2];
         const modal = new ModalBuilder().setCustomId(`embed_modal_${channelId}`).setTitle('Создание сообщения');
@@ -162,7 +197,7 @@ client.on('interactionCreate', async (interaction) => {
         );
         const channel = interaction.guild.channels.cache.get(config.channels.activeApps);
         if (channel) await channel.send({ content: `<@&${ROLES.leader}> <@&${ROLES.colonel}> <@&${ROLES.officer}>`, embeds: [embed], components: [row] });
-        return await interaction.editReply({ content: 'Ваша заявка отправлена!' });
+        return await interaction.editReply({ content: 'Заявка отправлена!' });
     }
 
     // Отправка Embed
