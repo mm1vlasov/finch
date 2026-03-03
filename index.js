@@ -418,7 +418,7 @@ client.on('interactionCreate', async (interaction) => {
                 .setColor('#f1c40f')
                 .setAuthor({ name: 'RENESSEANCE', iconURL: interaction.guild.iconURL() })
                 .setTitle('🔊 Приглашение на обзвон')
-                .setDescription(`Привет, <@${userId}>! Твоя заявка рассмотрена.\n\nМы приглашаем тебя на обзвон. Пожалуйста, зайди в голосовой канал, когда будешь готов.\n\n🎙️ <#1474135459633430600>\n\n**Время вызова (МСК):** \`${getMSKTime()}\``)
+                .setDescription(`Привет, <@${userId}>! Твоя заявка рассмотрена.\n\nМы приглашаем тебя на обзвон. Пожалуйста, зайди в голосовой канал, когда будешь готов.\n\n🎙️ <#1474125719557636249>\n\n\n\n🎙️ <#1474135541233614990>\n\n**Время вызова (МСК):** \`${getMSKTime()}\``)
                 .setFooter({ text: 'Recruitment System' });
 
             const callChan = interaction.guild.channels.cache.get(CHANNELS.call);
