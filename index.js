@@ -5,6 +5,7 @@ const {
 } = require('discord.js');
 const cron = require('node-cron');
 const config = require('./config.json');
+const fs = require('fs');
 
 const client = new Client({
     intents: [
@@ -41,6 +42,41 @@ const ADM_ROLES = [ROLES.leader, ROLES.colonel, ROLES.officer, ROLES.fullAccess]
 const COMMAND_ACCESS = [ROLES.leader, ROLES.colonel, ROLES.fullAccess];
 
 const getMSKTime = () => new Date().toLocaleString("ru-RU", {timeZone: "Europe/Moscow", hour: '2-digit', minute:'2-digit', day: '2-digit', month: '2-digit', year: 'numeric'});
+
+// --- НАСТРОЙКИ СБОРА КВ ---
+
+let kvJob = null;
+
+let KV_SETTINGS = {
+    days: [4,5,6],
+    time: "19:30",
+    voice: CHANNELS.kvVoice
+};
+
+if (fs.existsSync('./kv_settings.json')) {
+    KV_SETTINGS = JSON.parse(fs.readFileSync('./kv_settings.json'));
+}
+
+function saveKVSettings(){
+    fs.writeFileSync('./kv_settings.json', JSON.stringify(KV_SETTINGS,null,2));
+}
+
+function createKVCron(){
+
+    if(kvJob) kvJob.stop();
+
+    const [hour,minute] = KV_SETTINGS.time.split(':');
+
+    const days = KV_SETTINGS.days.join(',');
+
+    kvJob = cron.schedule(`${minute} ${hour} * * ${days}`, () => {
+        sendKVNotice();
+    },{
+        scheduled:true,
+        timezone:"Europe/Moscow"
+    });
+
+}
 
 // --- МОНИТОРИНГ СОСТАВА (ИСПРАВЛЕНО) ---
 async function updateStaffList() {
@@ -106,8 +142,8 @@ async function sendKVNotice(manualGuild = null) {
     const embed = new EmbedBuilder()
         .setColor('#cc0000')
         .setTitle('⚔️ ОБЩИЙ СБОР НА КЛАНОВЫЕ ВОЙНЫ')
-        .setDescription(`Бойцы, пора в бой! Собираемся в голосовом канале.\n\n📍 **Место:** [ЗАЙТИ В ГОЛОСОВОЙ КАНАЛ](https://discord.com/channels/${guild.id}/${CHANNELS.kvVoice})`)
-        .addFields({ name: '⏰ Время:', value: '`19:30 МСК`' })
+        .setDescription(`Бойцы, пора в бой! Собираемся в голосовом канале.\n\n📍 **Место:** [ЗАЙТИ В ГОЛОСОВОЙ КАНАЛ](https://discord.com/channels/${guild.id}/${KV_SETTINGS.voice})`)
+        .addFields({ name: '⏰ Время:', value: `\`${KV_SETTINGS.time} МСК\`` })
         .setTimestamp();
 
     await channel.send({ content: `<@&${ROLES.staff}>`, embeds: [embed] });
@@ -115,7 +151,7 @@ async function sendKVNotice(manualGuild = null) {
 
 client.once('ready', () => {
     console.log(`✅ Бот запущен: ${client.user.tag}`);
-    cron.schedule('30 19 * * 4,5,6', () => sendKVNotice(), { scheduled: true, timezone: "Europe/Moscow" });
+    createKVCron();
     setInterval(updateStaffList, 300000);
 });
 
@@ -140,7 +176,8 @@ client.on('messageCreate', async (message) => {
         );
 
         const row2 = new ActionRowBuilder().addComponents(
-            new ButtonBuilder().setCustomId('adm_create_embed').setLabel('Создать Embed').setStyle(ButtonStyle.Success)
+            new ButtonBuilder().setCustomId('adm_create_embed').setLabel('Создать Embed').setStyle(ButtonStyle.Success),
+            new ButtonBuilder().setCustomId('adm_kv_setup').setLabel('Настроить КВ').setStyle(ButtonStyle.Secondary)
         );
 
         await message.channel.send({ embeds: [adminEmbed], components: [row1, row2] });
@@ -270,9 +307,67 @@ client.on('interactionCreate', async (interaction) => {
             return interaction.reply({ content: '❌ Нет доступа.', ephemeral: true });
         }
 
-        if (interaction.customId === 'adm_kv_alert') {
-            await sendKVNotice(interaction.guild);
-            return interaction.reply({ content: '✅ Сбор на КВ отправлен.', ephemeral: true });
+        if (interaction.customId === 'adm_kv_setup') {
+
+            const modal = new ModalBuilder()
+                .setCustomId('kv_setup_modal')
+                .setTitle('Настройка сбора КВ');
+        
+            modal.addComponents(
+        
+                new ActionRowBuilder().addComponents(
+                    new TextInputBuilder()
+                        .setCustomId('days')
+                        .setLabel('Дни недели (1-7)')
+                        .setPlaceholder('4,5,6')
+                        .setStyle(TextInputStyle.Short)
+                        .setRequired(true)
+                ),
+        
+                new ActionRowBuilder().addComponents(
+                    new TextInputBuilder()
+                        .setCustomId('time')
+                        .setLabel('Время МСК')
+                        .setPlaceholder('19:30')
+                        .setStyle(TextInputStyle.Short)
+                        .setRequired(true)
+                ),
+        
+                new ActionRowBuilder().addComponents(
+                    new TextInputBuilder()
+                        .setCustomId('voice')
+                        .setLabel('ID голосового канала')
+                        .setStyle(TextInputStyle.Short)
+                        .setRequired(true)
+                )
+        
+            );
+        
+            return await interaction.showModal(modal);
+        
+        }
+
+        if (interaction.isModalSubmit() && interaction.customId === 'kv_setup_modal') {
+
+            const days = interaction.fields.getTextInputValue('days');
+            const time = interaction.fields.getTextInputValue('time');
+            const voice = interaction.fields.getTextInputValue('voice');
+        
+            KV_SETTINGS.days = days.split(',').map(d => parseInt(d.trim()));
+            KV_SETTINGS.time = time;
+            KV_SETTINGS.voice = voice;
+        
+            saveKVSettings();
+            createKVCron();
+        
+            return interaction.reply({
+                content: `✅ Настройки КВ сохранены
+        
+        📅 Дни: ${days}
+        ⏰ Время: ${time}
+        🔊 Канал: ${voice}`,
+                ephemeral: true
+            });
         }
 
         if (interaction.customId === 'adm_update_staff') {
