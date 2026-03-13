@@ -134,24 +134,36 @@ async function updateStaffList() {
 
 // --- АВТОМАТИЗАЦИЯ КВ ---
 async function sendKVNotice(manualGuild = null) {
+
     const guild = manualGuild || client.guilds.cache.first();
     if (!guild) return;
-    const channel = guild.channels.cache.get(CHANNELS.kvNotice);
-    if (!channel) return;
+
+    const channel = guild.channels.cache.get('1474137748628836444');
+    if (!channel) return console.log("❌ Канал КВ не найден");
 
     const embed = new EmbedBuilder()
         .setColor('#cc0000')
         .setTitle('⚔️ ОБЩИЙ СБОР НА КЛАНОВЫЕ ВОЙНЫ')
-        .setDescription(`Бойцы, пора в бой! Собираемся в голосовом канале.\n\n📍 **Место:** [ЗАЙТИ В ГОЛОСОВОЙ КАНАЛ](https://discord.com/channels/${guild.id}/${KV_SETTINGS.voice})`)
+        .setDescription(
+            `Бойцы, пора в бой! Собираемся в голосовом канале.\n\n` +
+            `📍 **Место:** https://discord.com/channels/${guild.id}/${KV_SETTINGS.voice}`
+        )
         .addFields({ name: '⏰ Время:', value: `\`${KV_SETTINGS.time} МСК\`` })
         .setTimestamp();
 
-    await channel.send({ content: `<@&${ROLES.staff}>`, embeds: [embed] });
+    await channel.send({
+        content: `<@&${ROLES.staff}>`,
+        embeds: [embed]
+    });
+
 }
 
 client.once('ready', () => {
     console.log(`✅ Бот запущен: ${client.user.tag}`);
+
     createKVCron();
+    updateStaffList();
+
     setInterval(updateStaffList, 300000);
 });
 
@@ -307,85 +319,97 @@ client.on('interactionCreate', async (interaction) => {
             return interaction.reply({ content: '❌ Нет доступа.', ephemeral: true });
         }
 
-        if (interaction.customId === 'adm_kv_setup') {
+        switch (interaction.customId) {
+            case 'adm_kv_setup': {
+                const modal = new ModalBuilder()
+                    .setCustomId('kv_setup_modal')
+                    .setTitle('Настройка сбора КВ');
 
-            const modal = new ModalBuilder()
-                .setCustomId('kv_setup_modal')
-                .setTitle('Настройка сбора КВ');
-        
-            modal.addComponents(
-        
-                new ActionRowBuilder().addComponents(
-                    new TextInputBuilder()
-                        .setCustomId('days')
-                        .setLabel('Дни недели (1-7)')
-                        .setPlaceholder('4,5,6')
-                        .setStyle(TextInputStyle.Short)
-                        .setRequired(true)
-                ),
-        
-                new ActionRowBuilder().addComponents(
-                    new TextInputBuilder()
-                        .setCustomId('time')
-                        .setLabel('Время МСК')
-                        .setPlaceholder('19:30')
-                        .setStyle(TextInputStyle.Short)
-                        .setRequired(true)
-                ),
-        
-                new ActionRowBuilder().addComponents(
-                    new TextInputBuilder()
-                        .setCustomId('voice')
-                        .setLabel('ID голосового канала')
-                        .setStyle(TextInputStyle.Short)
-                        .setRequired(true)
-                )
-        
-            );
-        
-            return await interaction.showModal(modal);
-        
+                modal.addComponents(
+                    new ActionRowBuilder().addComponents(
+                        new TextInputBuilder()
+                            .setCustomId('days')
+                            .setLabel('Дни недели (1-7)')
+                            .setStyle(TextInputStyle.Short)
+                            .setRequired(true)
+                    ),
+                    new ActionRowBuilder().addComponents(
+                        new TextInputBuilder()
+                            .setCustomId('time')
+                            .setLabel('Время МСК')
+                            .setStyle(TextInputStyle.Short)
+                            .setRequired(true)
+                    ),
+                    new ActionRowBuilder().addComponents(
+                        new TextInputBuilder()
+                            .setCustomId('voice')
+                            .setLabel('ID голосового канала')
+                            .setStyle(TextInputStyle.Short)
+                            .setRequired(true)
+                    )
+                );
+
+                return interaction.showModal(modal);
+            }
+            case 'adm_update_staff':
+                await updateStaffList();
+                return interaction.reply({ content: '✅ Состав обновлен.', ephemeral: true });
+            case 'adm_create_meeting': {
+                const modal = new ModalBuilder()
+                    .setCustomId('adm_modal_chan_meeting')
+                    .setTitle('Выбор канала для собрания');
+                modal.addComponents(
+                    new ActionRowBuilder().addComponents(
+                        new TextInputBuilder()
+                            .setCustomId('chan_id')
+                            .setLabel('Введите ID канала или упомяните его')
+                            .setStyle(TextInputStyle.Short)
+                            .setRequired(true)
+                    )
+                );
+                return interaction.showModal(modal);
+            }
+            case 'adm_create_embed': {
+                const modal = new ModalBuilder()
+                    .setCustomId('adm_modal_chan_embed')
+                    .setTitle('Выбор канала для Embed');
+                modal.addComponents(
+                    new ActionRowBuilder().addComponents(
+                        new TextInputBuilder()
+                            .setCustomId('chan_id')
+                            .setLabel('Введите ID канала или упомяните его')
+                            .setStyle(TextInputStyle.Short)
+                            .setRequired(true)
+                    )
+                );
+                return interaction.showModal(modal);
+            }
+            default:
+                return interaction.reply({ content: '❌ Неизвестная команда панели.', ephemeral: true });
         }
+    }
 
-        if (interaction.isModalSubmit() && interaction.customId === 'kv_setup_modal') {
+    // --- СОХРАНЕНИЕ НАСТРОЕК КВ ---
+    if (interaction.isModalSubmit() && interaction.customId === 'kv_setup_modal') {
+        const days = interaction.fields.getTextInputValue('days');
+        const time = interaction.fields.getTextInputValue('time');
+        const voice = interaction.fields.getTextInputValue('voice');
 
-            const days = interaction.fields.getTextInputValue('days');
-            const time = interaction.fields.getTextInputValue('time');
-            const voice = interaction.fields.getTextInputValue('voice');
-        
-            KV_SETTINGS.days = days.split(',').map(d => parseInt(d.trim()));
-            KV_SETTINGS.time = time;
-            KV_SETTINGS.voice = voice;
-        
-            saveKVSettings();
-            createKVCron();
-        
-            return interaction.reply({
-                content: `✅ Настройки КВ сохранены
-        
-        📅 Дни: ${days}
-        ⏰ Время: ${time}
-        🔊 Канал: ${voice}`,
-                ephemeral: true
-            });
-        }
+        KV_SETTINGS.days = days.split(',').map(d => parseInt(d.trim(), 10)).filter(n => Number.isFinite(n));
+        KV_SETTINGS.time = time;
+        KV_SETTINGS.voice = voice;
 
-        if (interaction.customId === 'adm_update_staff') {
-            await updateStaffList();
-            return interaction.reply({ content: '✅ Состав обновлен.', ephemeral: true });
-        }
+        saveKVSettings();
+        createKVCron();
 
-        if (interaction.customId === 'adm_create_meeting') {
-            const modal = new ModalBuilder().setCustomId('adm_modal_chan_meeting').setTitle('Выбор канала для собрания');
-            modal.addComponents(new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('chan_id').setLabel('Введите ID канала или упомяните его').setStyle(TextInputStyle.Short).setRequired(true)));
-            return await interaction.showModal(modal);
-        }
+        return interaction.reply({
+            content: `✅ Настройки КВ сохранены
 
-        if (interaction.customId === 'adm_create_embed') {
-            const modal = new ModalBuilder().setCustomId('adm_modal_chan_embed').setTitle('Выбор канала для Embed');
-            modal.addComponents(new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('chan_id').setLabel('Введите ID канала или упомяните его').setStyle(TextInputStyle.Short).setRequired(true)));
-            return await interaction.showModal(modal);
-        }
+📅 Дни: ${days}
+⏰ Время: ${time}
+🔊 Канал: ${voice}`,
+            ephemeral: true
+        });
     }
 
     if (interaction.isModalSubmit() && interaction.customId.startsWith('adm_modal_chan_')) {
@@ -629,6 +653,14 @@ client.on('interactionCreate', async (interaction) => {
         await chan.send({ content: `<@&${ROLES.staff}>`, embeds: [embed], components: [row] });
         await interaction.reply({ content: 'Собрание создано!', ephemeral: true });
     }
+});
+
+process.on("unhandledRejection", err => {
+    console.error("UNHANDLED PROMISE:", err);
+});
+
+process.on("uncaughtException", err => {
+    console.error("UNCAUGHT EXCEPTION:", err);
 });
 
 client.login(process.env.TOKEN || config.token);
