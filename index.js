@@ -384,6 +384,11 @@ client.on('interactionCreate', async (interaction) => {
                 );
                 return interaction.showModal(modal);
             }
+            case 'adm_kv_alert': {
+                await interaction.deferReply({ ephemeral: true });
+                await sendKVNotice(interaction.guild);
+                return interaction.editReply('✅ Анонс сбора на КВ отправлен.');
+            }
             default:
                 return interaction.reply({ content: '❌ Неизвестная команда панели.', ephemeral: true });
         }
